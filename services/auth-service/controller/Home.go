@@ -25,7 +25,7 @@ func Index(c *fiber.Ctx) error {
 }
 
 func ServiceStatusCheck(c *fiber.Ctx) error {
-	return c.JSON(fiber.Map{"status": 200, "message": "This API service is running"})
+	return c.JSON(fiber.Map{"status": 200, "message": "This API service is running!"})
 }
 
 func TestLoggingService(c *fiber.Ctx) error {

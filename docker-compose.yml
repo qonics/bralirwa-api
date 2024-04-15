@@ -1,10 +1,10 @@
-version: '3'
+# version: '3'
 
 services:
   scylladb:
     image: scylladb/scylla:latest
-    ports:
-      - "9042:9042"
+    # ports:
+    #   - "9042:9042"
     restart: always
     deploy:
       mode: replicated
@@ -109,6 +109,8 @@ services:
     deploy:
       mode: replicated
       replicas: 1
+    ports:
+      - "9005:9000"
     depends_on:
       - scylladb
     networks:
