@@ -1,0 +1,140 @@
+version: '3'
+
+services:
+  scylladb:
+    image: scylladb/scylla:latest
+    ports:
+      - "9042:9042"
+    restart: always
+    deploy:
+      mode: replicated
+      replicas: 1
+    volumes:
+      - ./db-data/scylladb/:/var/lib/scylla/data/
+    healthcheck:
+      test: ["CMD", "curl","-f","http://scylladb:9042"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+    networks:
+      - local-net
+
+  redis:
+    image: redis:alpine3.19
+    restart: always
+    deploy:
+      mode: replicated
+      replicas: 1
+    networks:
+      - local-net
+
+  # tyk_gateway:
+  #   image: tykio/tyk-gateway
+  #   ports:
+  #     - "8001:8080"
+  #   restart: always
+  #   deploy:
+  #     mode: replicated
+  #     replicas: 1
+  #   volumes:
+  #     - ./tyk/tyk.standalone.conf:/opt/tyk-gateway/tyk.conf
+  #     - ./tyk/apps:/opt/tyk-gateway/apps
+  #   environment:
+  #     - TYK_GW_SECRET=Qonics!
+  #   depends_on:
+  #     - redis
+  #   networks:
+  #     - local-net
+
+  etcd_server:
+    image: bitnami/etcd
+    ports:
+      - "2379:2379"
+    #   - "2380:2380"
+    environment:
+      - ALLOW_NONE_AUTHENTICATION=yes
+    restart: always
+    deploy:
+      mode: replicated
+      replicas: 1
+    volumes:
+      - ./etcd_conf/etcd.conf.yml:/opt/bitnami/etcd/conf/etcd.conf.yml
+      - ./db-data/etcd:/etcd-data
+    networks:
+      local-net:
+        ipv4_address: 10.20.0.253
+
+  apisix:
+    image: apache/apisix:latest
+    ports:
+      - "9080:9080"
+      - "9180:9180"
+      - "9091:9091"
+      - "9443:9443"
+    restart: always
+    deploy:
+      mode: replicated
+      replicas: 1
+    volumes:
+      - ./apisix/config.yaml:/usr/local/apisix/conf/config.yaml
+      - ./apisix/apisix_log:/usr/local/apisix/logs
+    healthcheck:
+      test: ["CMD", "curl","-f","http://etcd_server:2379"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+    networks:
+      - local-net
+
+  apisix-dashboard:
+    image: apache/apisix-dashboard:latest
+    ports:
+      - "9800:9000"
+    restart: always
+    deploy:
+      mode: replicated
+      replicas: 1
+    volumes:
+      - ./apisix/dashboard_config.yaml:/usr/local/apisix-dashboard/conf/conf.yaml
+    networks:
+      - local-net
+
+  auth-service:
+    build:
+      context: ./services/auth-service
+      dockerfile: app.dockerfile
+    restart: always
+    deploy:
+      mode: replicated
+      replicas: 1
+    depends_on:
+      - scylladb
+    networks:
+      - local-net
+
+  logger-service:
+    build:
+      context: ./services/logger-service
+      dockerfile: app.dockerfile
+    restart: always
+    deploy:
+      mode: replicated
+      replicas: 1
+    depends_on:
+      - scylladb
+    networks:
+      - local-net
+
+networks:
+  local-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.20.0.0/16
+          gateway: 10.20.0.254
+          ip_range: 10.20.0.0/24
+          # aux_addresses:
+          #   etcd_server: 10.20.0.253
+
