@@ -4,15 +4,12 @@ import (
 	"auth-service/config"
 	"auth-service/model"
 	"context"
-	"encoding/json"
 	"fmt"
 	"math/rand"
 	"os"
-	"strings"
 	"time"
 	"unsafe"
 
-	"github.com/gin-gonic/gin"
 	"github.com/spf13/viper"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -36,51 +33,6 @@ func InitializeViper() {
 	if err := viper.ReadInConfig(); err != nil {
 		fmt.Printf("Error reading config file, %s", err)
 	}
-}
-func SecurePath(c *gin.Context) *model.UserPayload {
-	token := c.GetHeader("Authorization")
-	token = strings.Replace(token, "Bearer ", "", 1)
-	// fmt.Println("TOKEN: ", token)
-	client := []byte(config.Redis.Get(ctx, token).Val())
-	if client == nil || len(string(client)) == 0 {
-		c.JSON(401, gin.H{"message": "Token not found or expired + " + token, "status": 401})
-		panic("Token not found or expired")
-	}
-	// fmt.Println("User data:", string(client))
-	var logger model.UserPayload
-	err := json.Unmarshal(client, &logger)
-	if err != nil {
-		c.JSON(401, gin.H{"message": "Authentication failed, invalid token", "status": 401})
-		panic("done, secure path failed #unmarshal" + err.Error())
-	}
-	// fmt.Println("User access_id:", logger.AccessId)
-	userAgent := c.Request.UserAgent()
-	// userIp := c.ClientIP()
-	if len(c.GetHeader("uag")) > 0 {
-		userAgent = c.GetHeader("uag")
-	}
-	if logger.Uag != userAgent {
-		//destroy this token, it is altered
-		config.Redis.Del(ctx, token)
-		c.JSON(401, gin.H{"message": "Authentication failed, invalid token", "status": 401})
-		panic("done, secure path failed #unmarshal" + err.Error())
-	}
-	// if len(c.GetHeader("ip")) > 0 {
-	// 	userIp = c.GetHeader("ip")
-	// }
-
-	//check if it is current active token for production
-	if os.Getenv("APP_MODE") == "release" {
-		activeToken := string([]byte(config.Redis.Get(ctx, "user_"+logger.Uid+"_active_token").Val()))
-		if token != activeToken {
-			//destroy this token, it is not the current
-			config.Redis.Del(ctx, token)
-			c.JSON(401, gin.H{"message": "Your account has be signed in on other computer", "status": 401})
-			panic("Your account has be signed in on other computer:" + activeToken + " - " + token)
-		}
-	}
-	config.Redis.Expire(ctx, token, time.Duration(SessionExpirationTime*time.Minute))
-	return &logger
 }
 
 func RandString(n int) string {

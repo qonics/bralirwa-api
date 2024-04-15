@@ -1,4 +1,4 @@
-CREATE KEYSPACE go-gin WITH replication = {'class':'SimpleStrategy', 'replication_factor' : 1};
+CREATE KEYSPACE go-fiber WITH replication = {'class':'SimpleStrategy', 'replication_factor' : 1};
 
 CREATE TABLE logs(
    id UUID,
