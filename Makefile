@@ -43,11 +43,13 @@ start:
 ## auth-service: builds the service binary as a linux executable, you will create many command as you add more services
 auth-service:
 	@echo "Building auth service binary..."
+	cd ./services/auth-service && go mod tidy
 	cd ./services/auth-service && env GOOS=linux CGO_ENABLED=0 go build -o ${APP_BINARY}
 	@echo "Done!"
 
 ## auth-service: builds the service binary as a linux executable, you will create many command as you add more services
 logger-service:
 	@echo "Building auth logger binary..."
+	cd ./services/logger-service && go mod tidy
 	cd ./services/logger-service && env GOOS=linux CGO_ENABLED=0 go build -o ${APP_BINARY}
 	@echo "Done!"

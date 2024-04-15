@@ -50,14 +50,14 @@ func TestLoggingService(c *fiber.Ctx) error {
 func LoginWithEmail(c *fiber.Ctx) error {
 	type UserData struct {
 		Email    string `json:"email" binding:"required"`
-		Password string `json:"string" binding:"required"`
+		Password string `json:"password" binding:"required"`
 	}
 	responseStatus := 200
 	userData := new(UserData)
 	if err := c.BodyParser(userData); err != nil {
 		responseStatus = 400
 		c.SendStatus(responseStatus)
-		return c.JSON(fiber.Map{"status": responseStatus, "message": "Please provide all required data"})
+		return c.JSON(fiber.Map{"status": responseStatus, "message": "Please provide all required data", "details": err})
 	}
 
 	//TODO: login logic goes here

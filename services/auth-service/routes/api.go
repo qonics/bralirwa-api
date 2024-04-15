@@ -60,6 +60,7 @@ func InitRoutes() *fiber.App {
 	}))
 	v1 := app.Group("/auth/api/v1/")
 	v1.Get("/service-status", controller.ServiceStatusCheck)
+	v1.Post("/service-status", controller.ServiceStatusCheck)
 	v1.Get("/", controller.Index)
 	v1.Get("/test-logger", controller.TestLoggingService)
 	v1.Post("/login", controller.LoginWithEmail)

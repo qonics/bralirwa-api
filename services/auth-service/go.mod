@@ -13,6 +13,7 @@ require (
 	github.com/gofiber/fiber/v2 v2.52.1
 	github.com/jinzhu/gorm v1.9.16
 	github.com/spf13/viper v1.18.2
+	github.com/valyala/fasthttp v1.51.0
 	golang.org/x/crypto v0.19.0
 	google.golang.org/grpc v1.63.2
 	libs/shared-package v0.0.0-00010101000000-000000000000
@@ -60,7 +61,6 @@ require (
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.2.9 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
-	github.com/valyala/fasthttp v1.51.0 // indirect
 	github.com/valyala/tcplisten v1.0.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/arch v0.0.0-20210923205945-b76863e36670 // indirect
