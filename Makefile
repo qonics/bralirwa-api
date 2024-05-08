@@ -44,6 +44,7 @@ start:
 auth-service:
 	@echo "Building auth service binary..."
 	cd ./services/auth-service && go mod tidy
+	cd ./services/auth-service/controller && go test -v
 	cd ./services/auth-service && env GOOS=linux CGO_ENABLED=0 go build -o ${APP_BINARY}
 	@echo "Done!"
 
@@ -51,5 +52,6 @@ auth-service:
 logger-service:
 	@echo "Building auth logger binary..."
 	cd ./services/logger-service && go mod tidy
+	cd ./services/logger-service/controller && go test -v
 	cd ./services/logger-service && env GOOS=linux CGO_ENABLED=0 go build -o ${APP_BINARY}
 	@echo "Done!"

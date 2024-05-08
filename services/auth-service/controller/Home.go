@@ -54,7 +54,7 @@ func LoginWithEmail(c *fiber.Ctx) error {
 	}
 	responseStatus := 200
 	userData := new(UserData)
-	if err := c.BodyParser(userData); err != nil {
+	if err := c.BodyParser(userData); err != nil || userData.Email == "" {
 		responseStatus = 400
 		c.SendStatus(responseStatus)
 		return c.JSON(fiber.Map{"status": responseStatus, "message": "Please provide all required data", "details": err})
