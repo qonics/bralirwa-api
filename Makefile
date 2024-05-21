@@ -12,6 +12,8 @@ up_build: auth-service logger-service
 	docker-compose down
 	@echo "Building (when required) and starting docker images..."
 	docker-compose up --build -d
+	@echo "Importing routes into APISIX"
+	sleep 5 && docker exec apisix_adc adc sync
 	@echo "Docker images built and started!"
 
 ## Build single service and pass the service by using the argument s. Ex: make build s=my-service

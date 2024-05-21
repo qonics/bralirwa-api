@@ -1,0 +1,20 @@
+name: Basic configuration
+routes:
+    - uri: /auth/*
+      name: "Auth service"
+      id: auth-service
+      service_id: auth-service
+      methods:
+        - POST
+        - GET
+        - DELETE
+        - PUT
+services:
+    - name: auth-service
+      upstream:
+        name: auth-service
+        nodes:
+            - host: auth-service
+              port: 9000
+              weight: 1
+version: 1.0.0

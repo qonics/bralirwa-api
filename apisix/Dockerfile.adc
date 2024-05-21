@@ -1,0 +1,9 @@
+FROM apache/apisix:latest
+
+# Set the working directory inside the container
+WORKDIR /home/apisix
+# Install necessary packages (if any)
+# Install the adc binary
+COPY adc /usr/bin/adc
+# Run the apisix binary
+# CMD ["adc", "sync"]

@@ -17,7 +17,6 @@
 # CAUTION: DO NOT MODIFY DEFAULT CONFIGURATIONS IN THIS FILE.
 # Keep the custom configurations in conf/config.yaml.
 #
-
 apisix:
   # node_listen: 9080          # APISIX listening port.
   node_listen:                 # APISIX listening ports.
@@ -26,6 +25,7 @@ apisix:
   #   - ip: 127.0.0.2          # If not set, default to `0.0.0.0`
   #     port: 9082
   enable_admin: true           # Admin API
+  enable_declarative_config: true
   enable_dev_mode: false       # If true, set nginx `worker_processes` to 1.
   enable_reuseport: true       # If true, enable nginx SO_REUSEPORT option.
   show_upstream_status_in_response_header: true  # If true, include the upstream HTTP status code in
@@ -133,6 +133,7 @@ apisix:
   events:                             # Event distribution module configuration
     module: lua-resty-events          # Sets the name of the events module used.
                                       # Supported module: lua-resty-worker-events and lua-resty-events
+                                    
 
 nginx_config:                     # Config for render the template to generate nginx.conf
   # user: root                    # Set the execution user of the worker process. This is only
@@ -632,8 +633,8 @@ deployment:                    # Deployment configurations
   role_traditional:
     config_provider: etcd      # Set the configuration center.
 
-  #role_data_plane:            # Set data plane details if role is data_plane.
-  #  config_provider: etcd     # Set the configuration center: etcd, xds, or yaml.
+  # role_data_plane:            # Set data plane details if role is data_plane.
+  #  config_provider: yaml     # Set the configuration center: etcd, xds, or yaml.
 
   #role_control_plane:         # Set control plane details if role is control_plane.
   #  config_provider: etcd     # Set the configuration center.
@@ -686,3 +687,20 @@ deployment:                    # Deployment configurations
       verify: true                # Verify the etcd certificate when establishing a TLS connection with etcd.
       # sni:                      # The SNI for etcd TLS requests.
                                   # If not set, the host from the URL is used.
+
+routes:
+  - uri: /auth/*
+    name: "Auth service"
+    id: "auth-service"
+    # methods: ["GET"]
+    upstream:
+      type: roundrobin
+      nodes:
+        "auth-service:9000": 1
+  
+  - id: getting-started-ip
+    uri: /ip
+    upstream:
+      type: roundrobin
+      nodes:
+        - httpbin.org:80

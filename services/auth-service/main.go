@@ -12,7 +12,7 @@ func main() {
 	config.ConnectDb()
 	defer config.SESSION.Close()
 	defer config.DB.Close()
-
+	config.GoogleConfig()
 	server := routes.InitRoutes()
 	server.Listen("0.0.0.0:9000")
 }

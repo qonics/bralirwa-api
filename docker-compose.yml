@@ -61,12 +61,24 @@ services:
     volumes:
       - ./etcd_conf/etcd.conf.yml:/opt/bitnami/etcd/conf/etcd.conf.yml
       - ./db-data/etcd:/etcd-data
+    healthcheck:
+      test: ["CMD", "etcdctl","endpoint","health"]
+      interval: 8s
+      timeout: 1s
+      retries: 5
+      start_period: 5s
     networks:
       local-net:
         ipv4_address: 10.20.0.253
 
-  apisix:
-    image: apache/apisix:latest
+  apisix-adc:
+    build:
+      context: ./apisix
+      dockerfile: Dockerfile.adc
+    container_name: apisix_adc
+    depends_on:
+      etcd_server:
+        condition: service_healthy
     ports:
       - "9080:9080"
       - "9180:9180"
@@ -77,14 +89,11 @@ services:
       mode: replicated
       replicas: 1
     volumes:
+      - ./apisix/adc.yaml:/home/apisix/.adc.yaml
+      - ./apisix/apisix.yaml:/home/apisix/apisix.yaml
       - ./apisix/config.yaml:/usr/local/apisix/conf/config.yaml
-      - ./apisix/apisix_log:/usr/local/apisix/logs
-    healthcheck:
-      test: ["CMD", "curl","-f","http://etcd_server:2379"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-      start_period: 30s
+      # - ./apisix/apisix_log:/usr/local/apisix/logs
+    # command: ["sh", "-c", "apisix start && sleep 20 && adc sync && tail -f /dev/stderr"]
     networks:
       - local-net
 
@@ -113,6 +122,8 @@ services:
     #   - "9005:9000"
     # depends_on:
     #   - scylladb
+    volumes:
+      - ./services/auth-service/config.yml:/app/config.yml
     networks:
       - local-net
 

@@ -3,6 +3,11 @@ package config
 import (
 	"fmt"
 	"os"
+	"shared-package/utils"
+
+	"github.com/spf13/viper"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
 )
 
 func InitializeConfig() {
@@ -12,4 +17,24 @@ func InitializeConfig() {
 	// }
 	fmt.Println("App mode: ", os.Getenv("APP_MODE"))
 
+}
+
+type Config struct {
+	GoogleLoginConfig oauth2.Config
+}
+
+var AppConfig Config
+
+func GoogleConfig() oauth2.Config {
+	utils.InitializeViper()
+
+	AppConfig.GoogleLoginConfig = oauth2.Config{
+		RedirectURL:  "http://127.0.0.1:9080/auth/api/v1/google/callback",
+		ClientID:     viper.GetString("google.clientID"),
+		ClientSecret: viper.GetString("google.clientSecret"),
+		Scopes: []string{"https://www.googleapis.com/auth/userinfo.email",
+			"https://www.googleapis.com/auth/userinfo.profile"},
+		Endpoint: google.Endpoint,
+	}
+	return AppConfig.GoogleLoginConfig
 }
