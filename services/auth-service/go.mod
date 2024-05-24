@@ -10,10 +10,10 @@ require (
 	github.com/goccy/go-json v0.10.2
 	github.com/gocql/gocql v1.2.1
 	github.com/gofiber/fiber/v2 v2.52.1
+	github.com/h2non/gock v1.2.0
 	github.com/jinzhu/gorm v1.9.16
 	github.com/spf13/viper v1.18.2
 	github.com/stretchr/testify v1.9.0
-	github.com/valyala/fasthttp v1.51.0
 	golang.org/x/oauth2 v0.17.0
 	google.golang.org/grpc v1.63.2
 	libs/shared-package v0.0.0-00010101000000-000000000000
@@ -22,6 +22,8 @@ require (
 require (
 	github.com/gofiber/template v1.8.3 // indirect
 	github.com/gofiber/utils v1.1.0 // indirect
+	github.com/h2non/parth v0.0.0-20190131123155-b4df798d6542 // indirect
+	github.com/valyala/fasthttp v1.51.0 // indirect
 )
 
 require (

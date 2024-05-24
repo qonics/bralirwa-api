@@ -13,6 +13,7 @@ func main() {
 	defer config.SESSION.Close()
 	defer config.DB.Close()
 	config.GoogleConfig()
+	config.GithubConfig()
 	server := routes.InitRoutes()
 	server.Listen("0.0.0.0:9000")
 }

@@ -15,6 +15,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+var IsTestMode bool = false
 var ctx = context.Background()
 var SessionExpirationTime time.Duration = 1800
 var CachePrefix string = "CACHE_MANAGER_"
@@ -66,11 +67,18 @@ func PanicRecover() {
 }
 func InitializeViper() {
 	viper.SetConfigName("config")
+	if IsTestMode {
+		fmt.Println("Running in Test mode...")
+		viper.AddConfigPath("../") // Adjust the path for test environment
+	} else {
+		// Normal mode configuration
+		viper.AddConfigPath("/app") // Adjust the path for production environment
+	}
 	viper.AddConfigPath("/app")
 	viper.AutomaticEnv()
 	viper.SetConfigType("yml")
 	if err := viper.ReadInConfig(); err != nil {
-		fmt.Printf("Error reading config file, %s", err)
+		log.Fatal("Error reading config file, ", err)
 	}
 }
 func GenerateCSRFToken() string {

@@ -98,6 +98,8 @@ func InitRoutes() *fiber.App {
 	v1.Post("/login", controller.LoginWithEmail)
 	v1.Get("/google/login", controller.LoginWithGoogle)
 	v1.Get("/google/callback", controller.GoogleCallback)
+	v1.Get("/github/login", controller.LoginWithGithub)
+	v1.Get("/github/callback", controller.GithubCallback)
 
 	return app
 }

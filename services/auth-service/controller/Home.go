@@ -5,7 +5,9 @@ import (
 	"auth-service/model"
 	"context"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"shared-package/utils"
 	"time"
 
@@ -13,7 +15,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/spf13/viper"
-	"github.com/valyala/fasthttp"
+	"golang.org/x/oauth2"
 	"google.golang.org/grpc"
 )
 
@@ -78,15 +80,13 @@ func LoginWithEmail(c *fiber.Ctx) error {
 
 func LoginWithGoogle(c *fiber.Ctx) error {
 	localState := viper.GetString("saltKey")
-	fmt.Println("LoginWithGoogle, State sent: ", localState)
 	url := config.AppConfig.GoogleLoginConfig.AuthCodeURL(localState)
-	c.Status(fiber.StatusSeeOther)
 	c.Redirect(url)
 	return c.JSON(url)
 }
 
 func GoogleCallback(c *fiber.Ctx) error {
-	fmt.Println("Google oauth callback received, ", c.Queries())
+	// fmt.Println("Google oauth callback received, ", c.Queries())
 	state := c.Query("state")
 	localState := viper.GetString("saltKey")
 	if state != localState {
@@ -99,15 +99,65 @@ func GoogleCallback(c *fiber.Ctx) error {
 
 	token, err := googleCon.Exchange(context.Background(), code)
 	if err != nil {
-		return c.SendString("Code-Token Exchange Failed")
+		return c.SendString("Code-Token Exchange Failed:" + err.Error())
 	}
-
-	status, resp, err := fasthttp.Get(nil, "https://www.googleapis.com/oauth2/v2/userinfo?access_token="+token.AccessToken)
+	resp, err := http.Get("https://www.googleapis.com/oauth2/v2/userinfo?access_token=" + token.AccessToken)
 	if err != nil {
-		return c.SendString(fmt.Sprintf("User Data Fetch Failed, %v", status))
+		return c.SendString(fmt.Sprintf("User Data Fetch Failed, %v", err.Error()))
+	}
+	if resp.Body == nil {
+		return c.SendString("Response body is nil")
+	}
+	// Read the response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return c.SendString(fmt.Sprintf("User body decoding failed, %v", err.Error()))
+	}
+	// body, _ := ioutil.ReadAll(response.Body)
+	userData := string(body)
+	//TODO: use this data to create or authenticate user
+	return c.SendString(string(userData))
+}
+
+func LoginWithGithub(c *fiber.Ctx) error {
+	localState := viper.GetString("saltKey")
+	url := config.AppConfig.GithubLoginConfig.AuthCodeURL(localState, oauth2.AccessTypeOffline)
+	// url := fmt.Sprintf("https://github.com/login/oauth/authorize%s", urlParams)
+	c.Redirect(url)
+	return c.JSON(url)
+}
+
+func GithubCallback(c *fiber.Ctx) error {
+	state := c.Query("state")
+	localState := viper.GetString("saltKey")
+	if state != localState {
+		fmt.Println("LoginWithGithub, State received: ", state, " | compare:", localState)
+		return c.SendString("States doesn't match")
 	}
 
-	userData := string(resp)
+	code := c.Query("code")
+	githubCon := config.GithubConfig()
+
+	token, err := githubCon.Exchange(context.Background(), code)
+	if err != nil {
+		return c.SendString("Code-Token Exchange Failed, " + err.Error())
+	}
+	request, err := http.NewRequest("GET", "https://api.github.com/user", nil)
+	if err != nil {
+		return c.SendString(fmt.Sprintf("Github User Data Fetch Failed, %v", err.Error()))
+	}
+	request.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token.AccessToken))
+	client := &http.Client{}
+	resp, err := client.Do(request)
+	if err != nil {
+		return c.SendString(fmt.Sprintf("Github User Data Fetch Failed, %v", err.Error()))
+	}
+	// Read the response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return c.SendString(fmt.Sprintf("User body decoding failed, %v", err.Error()))
+	}
+	userData := string(body)
 	//TODO: use this data to create or authenticate user
 	return c.SendString(string(userData))
 }
