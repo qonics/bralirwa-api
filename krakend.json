@@ -1,0 +1,132 @@
+{
+  "$schema": "https://www.krakend.io/schema/krakend.json",
+  "version": 3,
+  "name": "KrakenD - API Gateway",
+  "extra_config": {
+    "router": {
+      "disable_gzip": false
+    },
+    "qos/ratelimit/service": {
+      "max_rate": 1000,
+      "every": "1m",
+      "capacity": 1000,
+      "client_max_rate": 1000,
+      "strategy": "ip",
+      "key": "",
+      "client_capacity": 1000
+    },
+    "security/cors": {
+      "allow_origins": [
+        "*"
+      ],
+      "expose_headers": [
+        "Content-Length",
+        "Authorization"
+      ],
+      "max_age": "12h",
+      "allow_methods": [
+        "GET",
+        "HEAD",
+        "POST"
+      ],
+      "allow_credentials": true,
+      "allow_headers": [
+        "Access-Control-Allow-Headers",
+        "Authorization",
+        "X-Requested-With",
+        "x-csrf-token",
+        "Content-Type"
+      ]
+    },
+    "security/bot-detector": {
+      "empty_user_agent_is_bot": true,
+      "cache_size": 10000
+    },
+    "telemetry/logging": {
+      "level": "ERROR",
+      "prefix": "[KRAKEND]",
+      "syslog": false,
+      "stdout": true,
+      "format": "logstash",
+      "syslog_facility": "local3"
+    },
+    "telemetry/logstash": {
+      "enabled": true
+    },
+    "telemetry/metrics": {
+      "collection_time": "60s",
+      "proxy_disabled": false,
+      "router_disabled": false,
+      "backend_disabled": false,
+      "endpoint_disabled": false,
+      "listen_address": ":8090"
+    }
+  },
+  "timeout": "3000ms",
+  "cache_ttl": "300s",
+  "output_encoding": "json",
+  "port": 8080,
+  "endpoints": [
+    {
+      "endpoint": "/ws",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/ws",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "GET",
+          "host": [
+            "http://common-service:9000"
+          ],
+          "disable_host_sanitize": true
+        }
+      ]
+    },
+    {
+      "endpoint": "/ussd/api/v1/webhook",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/ussd/api/v1/webhook",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "GET",
+          "host": [
+            "http://ussd-service:9000"
+          ],
+          "disable_host_sanitize": false,
+          "input_query_strings": [
+            "*"
+          ]
+        }
+      ],
+      "input_query_strings": [
+        "msisdn",
+        "input",
+        "network_code",
+        "new_request",
+        "session_id"
+      ]
+    },
+    {
+      "endpoint": "/ussd/api/v1",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/ussd/api/v1",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "GET",
+          "host": [
+            "http://ussd-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ]
+    }
+  ]
+}

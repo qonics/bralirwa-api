@@ -7,13 +7,11 @@ up:
 	@echo "Docker images started"
 
 ## up_build: stops docker-compose (if running), builds all projects and starts docker compose, you can add more service after build_service, use space as separator
-up_build: auth-service logger-service
+up_build: web-service ussd-service logger-service
 	@echo "Stopping docker images (if running...)"
 	docker-compose down
 	@echo "Building (when required) and starting docker images..."
 	docker-compose up --build -d
-	@echo "Importing routes into APISIX"
-	sleep 5 && docker exec apisix_adc adc sync
 	@echo "Docker images built and started!"
 
 ## Build single service and pass the service by using the argument s. Ex: make build s=my-service
@@ -42,17 +40,25 @@ start:
 	docker-compose start
 	@echo "Done!"
 
-## auth-service: builds the service binary as a linux executable, you will create many command as you add more services
-auth-service:
-	@echo "Building auth service binary..."
-	cd ./services/auth-service && go mod tidy
-	cd ./services/auth-service/controller && go test -v
-	cd ./services/auth-service && env GOOS=linux CGO_ENABLED=0 go build -o ${APP_BINARY}
+## web-service: builds the service binary as a linux executable, you will create many command as you add more services
+web-service:
+	@echo "Building web service binary..."
+	cd ./services/web-service && go mod tidy
+	cd ./services/web-service/controller && go test -v
+	cd ./services/web-service && env GOOS=linux CGO_ENABLED=0 go build -o ${APP_BINARY}
 	@echo "Done!"
 
-## auth-service: builds the service binary as a linux executable, you will create many command as you add more services
+## web-service: builds the service binary as a linux executable, you will create many command as you add more services
+ussd-service:
+	@echo "Building ussd service binary..."
+	cd ./services/ussd-service && go mod tidy
+	cd ./services/ussd-service/controller && go test -v
+	cd ./services/ussd-service && env GOOS=linux CGO_ENABLED=0 go build -o ${APP_BINARY}
+	@echo "Done!"
+
+## web-service: builds the service binary as a linux executable, you will create many command as you add more services
 logger-service:
-	@echo "Building auth logger binary..."
+	@echo "Building logger service binary..."
 	cd ./services/logger-service && go mod tidy
 	cd ./services/logger-service/controller && go test -v
 	cd ./services/logger-service && env GOOS=linux CGO_ENABLED=0 go build -o ${APP_BINARY}

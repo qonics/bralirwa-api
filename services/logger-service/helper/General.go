@@ -3,8 +3,6 @@ package helper
 import (
 	"context"
 	"fmt"
-	"logger-service/config"
-	"logger-service/model"
 	"math/rand"
 	"os"
 	"time"
@@ -61,17 +59,18 @@ func GetUniqueSecret(key *string) (string, string) {
 	secret := fmt.Sprintf("%s.%s", os.Getenv("secret"), keyCode)
 	return keyCode, secret
 }
-func SaveActivityLog(eventType string, activity string, ipAddress string, agent string, operator uint, table string, id string) {
-	resp := config.DB.Create(&model.ActivityLogs{
-		EventType: eventType,
-		Activity:  activity,
-		IpAddress: ipAddress,
-		Operator:  operator,
-		Agent:     agent,
-		Type:      table,
-		Extra:     fmt.Sprintf("{\"id\":\"%s\"}", id),
-	})
-	if resp.Error != nil {
-		Warning("Unable to save log: " + resp.Error.Error())
-	}
-}
+
+// func SaveActivityLog(eventType string, activity string, ipAddress string, agent string, operator uint, table string, id string) {
+// 	resp := config.DB.Exec(&model.ActivityLogs{
+// 		EventType: eventType,
+// 		Activity:  activity,
+// 		IpAddress: ipAddress,
+// 		Operator:  operator,
+// 		Agent:     agent,
+// 		Type:      table,
+// 		Extra:     fmt.Sprintf("{\"id\":\"%s\"}", id),
+// 	})
+// 	if resp.Error != nil {
+// 		Warning("Unable to save log: " + resp.Error.Error())
+// 	}
+// }

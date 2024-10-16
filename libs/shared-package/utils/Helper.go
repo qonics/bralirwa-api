@@ -4,15 +4,21 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	mathRand "math/rand"
 	"os"
+	"shared-package/proto"
 	"time"
 	"unsafe"
 
+	"github.com/gofiber/fiber/v2"
+	"github.com/nicksnyder/go-i18n/v2/i18n"
 	"github.com/spf13/viper"
 	"golang.org/x/crypto/bcrypt"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 var IsTestMode bool = false
@@ -65,8 +71,8 @@ func PanicRecover() {
 		log.Println("Recovered from panic: ", r)
 	}
 }
-func InitializeViper() {
-	viper.SetConfigName("config")
+func InitializeViper(configName string, configType string) {
+	viper.SetConfigName(configName)
 	if IsTestMode {
 		fmt.Println("Running in Test mode...")
 		viper.AddConfigPath("../") // Adjust the path for test environment
@@ -74,11 +80,16 @@ func InitializeViper() {
 		// Normal mode configuration
 		viper.AddConfigPath("/app") // Adjust the path for production environment
 	}
-	viper.AddConfigPath("/app")
 	viper.AutomaticEnv()
-	viper.SetConfigType("yml")
-	if err := viper.ReadInConfig(); err != nil {
-		log.Fatal("Error reading config file, ", err)
+	viper.SetConfigType(configType)
+	if viper.AllKeys() == nil {
+		if err := viper.ReadInConfig(); err != nil {
+			log.Fatal("Error reading config file, ", err)
+		}
+	} else {
+		if err := viper.MergeInConfig(); err != nil {
+			log.Fatalf("Error reading config file 2, %s", err)
+		}
 	}
 }
 func GenerateCSRFToken() string {
@@ -88,4 +99,60 @@ func GenerateCSRFToken() string {
 		log.Panic("Unable to generate CSRF Token")
 	}
 	return hex.EncodeToString(token)
+}
+func LogMessage(logLevel string, message string, service string, forcedTraceId ...string) string {
+	fmt.Println(message)
+	conn, err := grpc.Dial("logger-service:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		log.Fatal("Logger service not connected: " + err.Error())
+	}
+	defer conn.Close()
+	client := proto.NewLoggerServiceClient(conn)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	traceId := RandString(12)
+	//manually set log trace id
+	if forcedTraceId != nil && forcedTraceId[0] != "" {
+		traceId = forcedTraceId[0]
+	}
+	r, err := client.Log(ctx, &proto.LogRequest{LogLevel: logLevel, LogTime: time.Now().Format(time.DateTime),
+		ServiceName: service, Message: message, Identifier: traceId})
+	if err != nil {
+		log.Fatal("Logger service not responsed: " + err.Error())
+	}
+	log.Printf("Response: %s", r.GetResponse())
+	return traceId
+}
+
+func USSDResponse(c *fiber.Ctx, networkCode string, action string, message string) error {
+	if networkCode == "MTN" {
+		c.Set("Content-Type", "text/plain")
+		c.Set("Freeflow", action)
+		c.Set("Cache-Control", "max-age=0")
+		c.Set("Pragma", "no-cache")
+		c.Set("Expires", "-1")
+		c.Set("Content-Length", fmt.Sprintf("%v", len(message)))
+		c.SendStatus(200)
+		c.SendString(message)
+		return nil
+	} else if networkCode == "AIRTEL" {
+		c.Set("Content-Type", "text/plain")
+		c.Set("Freeflow", action)
+		c.Set("Cache-Control", "max-age=0")
+		c.Set("Pragma", "no-cache")
+		c.Set("Expires", "-1")
+		c.Set("Content-Length", fmt.Sprintf("%v", len(message)))
+		c.SendStatus(200)
+		c.SendString(message)
+		return nil
+	}
+	LogMessage("error", "USSDResponse: Invalid network code, "+networkCode, "ussd-service")
+	return errors.New("invalid network code")
+}
+
+func Localize(localizer *i18n.Localizer, messageID string, templateData map[string]interface{}) string {
+	return localizer.MustLocalize(&i18n.LocalizeConfig{
+		MessageID:    messageID,
+		TemplateData: templateData,
+	})
 }

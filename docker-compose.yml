@@ -1,27 +1,30 @@
 # version: '3'
 
 services:
-  scylladb:
-    image: scylladb/scylla:latest
+  krakend:
+    image: devopsfaith/krakend
     ports:
-      - "9042:9042"
+      - "8090:8080"
+    volumes:
+      - ./krakend.json:/etc/krakend/krakend.json
+    networks:
+      - local-net
+
+  postgres:
+    image: postgres:17.0
     restart: always
     deploy:
       mode: replicated
       replicas: 1
+    environment:
+      POSTGRES_PASSWORD: Br@l!rwa*
     volumes:
-      - ./db-data/scylladb/:/var/lib/scylla/data/
-    healthcheck:
-      test: ["CMD", "curl","-f","http://scylladb:9042"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-      start_period: 30s
+      - ./db-data/postgresql/:/var/lib/postgresql/data
     networks:
       - local-net
 
   redis:
-    image: redis:alpine3.19
+    image: redis:alpine3.20
     restart: always
     deploy:
       mode: replicated
@@ -29,101 +32,33 @@ services:
     networks:
       - local-net
 
-  # tyk_gateway:
-  #   image: tykio/tyk-gateway
-  #   ports:
-  #     - "8001:8080"
-  #   restart: always
-  #   deploy:
-  #     mode: replicated
-  #     replicas: 1
-  #   volumes:
-  #     - ./tyk/tyk.standalone.conf:/opt/tyk-gateway/tyk.conf
-  #     - ./tyk/apps:/opt/tyk-gateway/apps
-  #   environment:
-  #     - TYK_GW_SECRET=Qonics!
-  #   depends_on:
-  #     - redis
-  #   networks:
-  #     - local-net
-
-  etcd_server:
-    image: bitnami/etcd
-    ports:
-      - "2379:2379"
-    #   - "2380:2380"
-    environment:
-      - ALLOW_NONE_AUTHENTICATION=yes
-    restart: always
-    deploy:
-      mode: replicated
-      replicas: 1
-    volumes:
-      - ./etcd_conf/etcd.conf.yml:/opt/bitnami/etcd/conf/etcd.conf.yml
-      - ./db-data/etcd:/etcd-data
-    healthcheck:
-      test: ["CMD", "etcdctl","endpoint","health"]
-      interval: 8s
-      timeout: 1s
-      retries: 5
-      start_period: 5s
-    networks:
-      local-net:
-        ipv4_address: 10.20.0.253
-
-  apisix-adc:
+  web-service:
     build:
-      context: ./apisix
-      dockerfile: Dockerfile.adc
-    container_name: apisix_adc
-    depends_on:
-      etcd_server:
-        condition: service_healthy
-    ports:
-      - "9080:9080"
-      - "9180:9180"
-      - "9091:9091"
-      - "9443:9443"
-    restart: always
-    deploy:
-      mode: replicated
-      replicas: 1
-    volumes:
-      - ./apisix/adc.yaml:/home/apisix/.adc.yaml
-      - ./apisix/apisix.yaml:/home/apisix/apisix.yaml
-      - ./apisix/config.yaml:/usr/local/apisix/conf/config.yaml
-      # - ./apisix/apisix_log:/usr/local/apisix/logs
-    # command: ["sh", "-c", "apisix start && sleep 20 && adc sync && tail -f /dev/stderr"]
-    networks:
-      - local-net
-
-  apisix-dashboard:
-    image: apache/apisix-dashboard:latest
-    ports:
-      - "9800:9000"
-    restart: always
-    deploy:
-      mode: replicated
-      replicas: 1
-    volumes:
-      - ./apisix/dashboard_config.yaml:/usr/local/apisix-dashboard/conf/conf.yaml
-    networks:
-      - local-net
-
-  auth-service:
-    build:
-      context: ./services/auth-service
+      context: ./services/web-service
       dockerfile: app.dockerfile
     restart: always
     deploy:
       mode: replicated
       replicas: 1
-    # ports:
-    #   - "9005:9000"
-    # depends_on:
-    #   - scylladb
-    volumes:
-      - ./services/auth-service/config.yml:/app/config.yml
+    environment:
+      - LOG_LEVEL=debug
+      - WEB_URL=http://localhost:3000
+      - BACKEND_URL=http://localhost:9080
+    networks:
+      - local-net
+
+  ussd-service:
+    build:
+      context: ./services/ussd-service
+      dockerfile: app.dockerfile
+    restart: always
+    deploy:
+      mode: replicated
+      replicas: 1
+    environment:
+      - LOG_LEVEL=debug
+      - WEB_URL=http://localhost:3000
+      - BACKEND_URL=http://localhost:9080
     networks:
       - local-net
 

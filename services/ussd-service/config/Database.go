@@ -6,8 +6,9 @@ import (
 	"log"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql"
+	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/jackc/pgx/v5/pgxpool"
+	_ "github.com/lib/pq" // PostgreSQL driver for database/sql
 	"github.com/spf13/viper"
 )
 
@@ -20,8 +21,10 @@ func ConnectDb() {
 	host := viper.GetString("postgres_db.cluster")
 	port := viper.GetInt("postgres_db.port")
 	dbname := viper.GetString("postgres_db.keyspace")
+
 	// Construct the connection string
 	databaseUrl := fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable", user, password, host, port, dbname)
+
 	// Step 3: Create pgxpool.Pool connection for your application
 	dbConfig, err := pgxpool.ParseConfig(databaseUrl)
 	if err != nil {
@@ -33,19 +36,15 @@ func ConnectDb() {
 	dbConfig.MaxConnIdleTime = 30 * time.Minute
 	dbConfig.HealthCheckPeriod = time.Minute
 	dbConfig.ConnConfig.ConnectTimeout = 5 * time.Second
+
 	// Create pgxpool.Pool for application use
 	pool, err := pgxpool.NewWithConfig(context.Background(), dbConfig)
 	if err != nil {
 		log.Fatalf("Error while creating pgxpool connection: %v", err)
 	}
+
+	// Assign to global variable
 	DB = pool
-	//Gorm ORM: Mysql, postgress,..
-	// connectionUrl := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8&parseTime=True&loc=Local", os.Getenv("user"), os.Getenv("password"), os.Getenv("host"), os.Getenv("port"), os.Getenv("database"))
-	// fmt.Println(connectionUrl)
-	// database, err := gorm.Open("mysql", connectionUrl)
-	// fmt.Println(connectionUrl)
-	// if err != nil {
-	// 	panic("Database connection error " + err.Error())
-	// }
-	// database.AutoMigrate(&model.AssessmentDistribution{})
+
+	log.Println("Database connected and ready for application use!")
 }
