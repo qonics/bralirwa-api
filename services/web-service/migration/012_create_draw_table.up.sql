@@ -6,7 +6,9 @@ CREATE TABLE IF NOT EXISTS draw (
     status VARCHAR(50), -- (confirmed, pending, closed)
     reason TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT unique_customer_prize UNIQUE (customer_id, prize_type_id),
+    CONSTRAINT unique_code_prize UNIQUE (code, prize_type_id)
 );
 
 -- Index for fast lookup on code, customer_id, and status

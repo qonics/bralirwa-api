@@ -4,3 +4,7 @@ Create a streamlined Go Fiber project instantly with our Quickstart template. Fe
 
 ## How it works
 Just clone this project and start coding in a minute
+
+## create pg password
+kubectl create secret generic postgres-password \
+  --from-literal=postgres-password=yourpassword -n <namespace>

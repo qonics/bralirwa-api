@@ -29,7 +29,7 @@
         "HEAD",
         "POST"
       ],
-      "allow_credentials": true,
+      "allow_credentials": false,
       "allow_headers": [
         "Access-Control-Allow-Headers",
         "Authorization",
@@ -106,9 +106,9 @@
       "input_query_strings": [
         "msisdn",
         "input",
-        "network_code",
-        "new_request",
-        "session_id"
+        "networkCode",
+        "newRequest",
+        "sessionId"
       ]
     },
     {
@@ -126,6 +126,60 @@
           ],
           "disable_host_sanitize": false
         }
+      ]
+    },
+    {
+      "endpoint": "/api/v1/login",
+      "method": "POST",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/api/v1/login",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "POST",
+          "host": [
+            "http://web-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ]
+    },
+    {
+      "endpoint": "/api/v1/service-status",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/ussd/api/v1/service-status",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "GET",
+          "host": [
+            "http://ussd-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ]
+    },
+    {
+      "endpoint": "/api/v1/profile",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/api/v1/profile",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "GET",
+          "host": [
+            "http://web-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ],
+      "input_headers": [
+        "Authorization"
       ]
     }
   ]

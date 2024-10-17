@@ -3,11 +3,14 @@ package controller
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http/httptest"
 	"shared-package/utils"
 	"testing"
+	"web-service/config"
 
+	"github.com/go-redis/redis/v8"
 	"github.com/gofiber/fiber/v2"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -32,18 +35,19 @@ func TestLoginWithEmail(t *testing.T) {
 			description: "successful login",
 			payload: map[string]string{
 				"email":    "test@qonics.com",
-				"password": "password123",
+				"password": "password",
 			},
 			expectedCode: 200,
 			expectedBody: "Login completed",
 			expectedData: map[string]interface{}{
 				"status":  200,
 				"message": "Login completed",
-				"user_data": map[string]interface{}{
-					"Username": "test",
-					"Email":    "test@qonics.com",
-					"Names":    "Test user",
-					"Status":   float64(1), // JSON unmarshalling converts numbers to floats
+				"data": map[string]interface{}{
+					"can_add_codes": true,
+					"email":         "test@qonics.com",
+					"firstname":     "Admin",
+					"lastname":      "User test",
+					"status":        "OKAY", // JSON unmarshalling converts numbers to floats
 				},
 			},
 		},
@@ -79,7 +83,7 @@ func TestLoginWithEmail(t *testing.T) {
 
 		// Read the response body
 		body, _ := io.ReadAll(resp.Body)
-
+		// fmt.Println(string(body))
 		// Check the response body contains expected text
 		a.Contains(string(body), test.expectedBody, test.description)
 
@@ -88,15 +92,15 @@ func TestLoginWithEmail(t *testing.T) {
 			json.Unmarshal(body, &result)
 
 			// Check detailed fields for successful login
-			if test.description == "successful login" {
-				userData, ok := result["user_data"].(map[string]interface{})
-				a.True(ok, "user_data should be a map")
+			if test.expectedCode == 200 {
+				userData, ok := result["data"].(map[string]interface{})
+				a.True(ok, "data should be a map")
 
 				// Check each field
-				a.Equal(test.expectedData["user_data"].(map[string]interface{})["Username"], userData["Username"])
-				a.Equal(test.expectedData["user_data"].(map[string]interface{})["Email"], userData["Email"])
-				a.Equal(test.expectedData["user_data"].(map[string]interface{})["Names"], userData["Names"])
-				a.Equal(test.expectedData["user_data"].(map[string]interface{})["Status"], userData["Status"])
+				a.Equal(test.expectedData["data"].(map[string]interface{})["can_add_codes"], userData["can_add_codes"])
+				a.Equal(test.expectedData["data"].(map[string]interface{})["email"], userData["email"])
+				a.Equal(test.expectedData["data"].(map[string]interface{})["firstname"], userData["firstname"])
+				a.Equal(test.expectedData["data"].(map[string]interface{})["status"], userData["status"])
 			}
 		}
 	}
@@ -106,4 +110,26 @@ func TestLoginWithEmail(t *testing.T) {
 func init() {
 	utils.IsTestMode = true
 	viper.Set("saltKey", "testSaltKey")
+	utils.IsTestMode = true
+	utils.InitializeViper("config", "yml")
+	viper.Set("saltKey", "testSaltKey")
+	//set the test db config
+	viper.Set("postgres_db.cluster", "127.0.0.1")
+	viper.Set("postgres_db.keyspace", "lottery_db")
+	viper.Set("postgres_db.password", viper.GetString("postgres_db_test.password"))
+	config.ConnectDb()
+	config.Redis = redis.NewClient(&redis.Options{
+		Addr:     fmt.Sprintf("%s:%s", viper.GetString("redis_test.host"), viper.GetString("redis_test.port")),
+		Password: viper.GetString("redis_test.password"),
+		DB:       viper.GetInt("redis_test.database"),
+	})
+	//Create dummy users for testing
+	config.DB.Exec(ctx, `INSERT INTO users (fname, lname, phone, email, can_add_codes,can_trigger_draw,can_add_user,can_view_logs, department_id, email_verified, phone_verified, locale, avatar_url, password, status, address, operator)
+VALUES
+('Admin', 'User test', 'NOT_AVAILABLE', 'test@qonics.com', true, true, true, true, 1, FALSE, FALSE, 'en', 'NOT_AVAILABLE',
+ '$2a$06$GeEpPxbKoTn3tAkyufWilumzne1MvF4uw0Vl7/X/VsZ4DM.r3zWRi', 'OKAY', 'NOT_AVAILABLE', NULL);`)
+	config.DB.Exec(ctx, `INSERT INTO users (fname, lname, phone, email, can_add_codes,can_trigger_draw,can_add_user,can_view_logs, department_id, email_verified, phone_verified, locale, avatar_url, password, status, address, operator)
+VALUES
+('Admin', 'User test 2', 'NOT_AVAILABLE', 'test2@qonics.com', false, false, false, true, 1, FALSE, FALSE, 'en', 'NOT_AVAILABLE',
+ '$2a$06$GeEpPxbKoTn3tAkyufWilumzne1MvF4uw0Vl7/X/VsZ4DM.r3zWRi', 'OKAY', 'NOT_AVAILABLE', NULL);`)
 }

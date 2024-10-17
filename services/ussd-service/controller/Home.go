@@ -70,16 +70,16 @@ func USSDService(c *fiber.Ctx) error {
 	type USSDData struct {
 		Msisdn      string `form:"msisdn" validate:"required"`
 		Input       string `form:"input" validate:"required"`
-		SessionId   string `form:"session_id" validate:"required"`
-		NetworkCode string `form:"network_code" validate:"required"`
-		NewRequest  bool   `form:"new_request" validate:"required"`
+		SessionId   string `form:"sessionId" validate:"required"`
+		NetworkCode string `form:"networkCode" validate:"required"`
+		NewRequest  bool   `form:"newRequest"`
 	}
 	ussd_data := USSDData{
 		Msisdn:      c.Query("msisdn"),
 		Input:       c.Query("input"),
-		SessionId:   c.Query("session_id"),
-		NetworkCode: c.Query("network_code"),
-		NewRequest:  c.Query("new_request") == "1",
+		SessionId:   c.Query("sessionId"),
+		NetworkCode: c.Query("networkCode"),
+		NewRequest:  c.Query("newRequest") == "1",
 	}
 
 	if err := Validate.Struct(ussd_data); err != nil {

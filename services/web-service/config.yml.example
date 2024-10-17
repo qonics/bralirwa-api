@@ -9,7 +9,7 @@ redis:
   database: 0
 db:
   cluster: scylladb
-  keyspace: swiftqom_auth
+  keyspace: lottery_auth
   password:
 google:
   clientID: 
