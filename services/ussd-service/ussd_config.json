@@ -99,13 +99,13 @@
                 {
                     "input": 1,
                     "value": null,
-                    "action": null,
+                    "action": "",
                     "next_step": "entry_code"
                 },
                 {
                     "input": 2,
                     "value": null,
-                    "action": null,
+                    "action": "",
                     "next_step": "change_lang"
                 }
             ],
@@ -120,14 +120,14 @@
                 {
                     "input": 0,
                     "value": null,
-                    "action": null,
+                    "action": "",
                     "next_step": "home"
                 },
                 {
                     "input": 1,
                     "value": "en",
                     "action": "savePreferredLang",
-                    "next_step": "lang_ack"
+                    "next_step": "action_ack"
                 },
                 {
                     "input": 2,
@@ -147,13 +147,13 @@
                 {
                     "input": 1,
                     "value": null,
-                    "action": null,
+                    "action": "",
                     "next_step": "home"
                 },
                 {
                     "input": 2,
                     "value": null,
-                    "action": null,
+                    "action": "",
                     "next_step": ""
                 }
             ],
@@ -168,7 +168,7 @@
                 {
                     "input": 0,
                     "value": null,
-                    "action": null,
+                    "action": "",
                     "next_step": "home"
                 },
                 {

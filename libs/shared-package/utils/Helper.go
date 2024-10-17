@@ -151,8 +151,13 @@ func USSDResponse(c *fiber.Ctx, networkCode string, action string, message strin
 }
 
 func Localize(localizer *i18n.Localizer, messageID string, templateData map[string]interface{}) string {
-	return localizer.MustLocalize(&i18n.LocalizeConfig{
+	msg, err := localizer.Localize(&i18n.LocalizeConfig{
 		MessageID:    messageID,
 		TemplateData: templateData,
 	})
+	if err != nil {
+		LogMessage("error", "Localize: "+err.Error(), "ussd-service")
+		return messageID
+	}
+	return msg
 }

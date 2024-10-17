@@ -4,4 +4,4 @@ CREATE TABLE IF NOT EXISTS province (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX idx_province_code ON province(name);
+CREATE INDEX idx_province_name ON province(name);

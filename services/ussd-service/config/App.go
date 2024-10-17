@@ -8,8 +8,10 @@ import (
 )
 
 var Redis *redis.Client
+var EncryptionKey string
 
 func InitializeConfig() {
+	EncryptionKey = viper.GetString("encryption_key")
 	Redis = redis.NewClient(&redis.Options{
 		Addr:     fmt.Sprintf("%s:%s", viper.GetString("redis.host"), viper.GetString("redis.port")),
 		Password: viper.GetString("redis.password"),

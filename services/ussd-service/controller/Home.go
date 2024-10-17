@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"reflect"
 	"shared-package/utils"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -27,7 +28,6 @@ var ctx = context.Background()
 var systemError = "System error. Please try again later."
 
 // TODO: load this from hashicorp vault
-var encryptionKey = "example-encryption-key"
 
 const USSD_MAX_LENGTH = 160 // Example value, adjust as needed
 
@@ -36,6 +36,7 @@ type USSDFlow struct {
 }
 
 var bundle *i18n.Bundle
+
 var lang = "en" // Default language
 var localizer *i18n.Localizer
 
@@ -44,12 +45,17 @@ func init() {
 	bundle.RegisterUnmarshalFunc("toml", toml.Unmarshal)
 	_, err := bundle.LoadMessageFile("/app/locales/ussd.en.toml")
 	if err != nil {
+		fmt.Println("Error loading EN translations:", err)
+	}
+	_, err = bundle.LoadMessageFile("/app/locales/ussd.sw.toml")
+	if err != nil {
 		fmt.Println("Error loading translations:", err)
 	}
-	// bundle.LoadMessageFile("ussd.rw.toml")
-	// ... add more translations as needed
 }
 func loadLocalizer(lang string) *i18n.Localizer {
+	if lang == "rw" {
+		return i18n.NewLocalizer(bundle, "sw")
+	}
 	return i18n.NewLocalizer(bundle, lang)
 }
 func (u *USSDFlow) SetNextData(sessionId string, nextData string) error {
@@ -91,8 +97,11 @@ func USSDService(c *fiber.Ctx) error {
 	}
 	return utils.USSDResponse(c, ussd_data.NetworkCode, "FC", message)
 }
+
+var USSDdata *model.USSDData
+
 func processUSSD(input *string, phone string, sessionId string, networkOperator string) (string, error, bool) {
-	USSDdata, err := getUssdData(sessionId)
+	USSDdata, _ = getUssdData(sessionId)
 	// fmt.Println("USSDdata", USSDdata)
 	if USSDdata != nil && USSDdata.StepId == "" {
 		return "action_done", errors.New("no step id found, end session"), true
@@ -105,7 +114,7 @@ func processUSSD(input *string, phone string, sessionId string, networkOperator 
 	customer := &model.Customer{}
 	if USSDdata == nil || USSDdata.CustomerId == nil {
 		// Re-fetch customer data
-		err := config.DB.QueryRow(ctx, "select id,pgp_sym_decrypt(names::bytea,$1),network_operator,locale from customer where phone_hash = digest($2,'sha256')", encryptionKey, phone).
+		err := config.DB.QueryRow(ctx, "select id,pgp_sym_decrypt(names::bytea,$1),network_operator,locale from customer where phone_hash = digest($2,'sha256')", config.EncryptionKey, phone).
 			Scan(&customer.Id, &customer.Names, &customer.NetworkOperator, &customer.Locale)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
@@ -113,7 +122,7 @@ func processUSSD(input *string, phone string, sessionId string, networkOperator 
 				// USSDdata.LastInput = *input
 				// USSDdata.Id = sessionId
 			} else {
-				return "", err, true
+				return "", fmt.Errorf("fetch customer failed, err: %v", err), true
 			}
 		} else {
 			lang = customer.Locale
@@ -131,6 +140,7 @@ func processUSSD(input *string, phone string, sessionId string, networkOperator 
 		}
 	}
 	if USSDdata == nil {
+		//TODO: check if phone is in MTN momo or AIRTEL money
 		isNewRequest = true
 		//fetch initial step
 		USSDdata = &model.USSDData{
@@ -143,6 +153,14 @@ func processUSSD(input *string, phone string, sessionId string, networkOperator 
 			StepId:       initialStep,
 		}
 		setUssdData(*USSDdata)
+	}
+	if !isNewRequest && USSDdata.StepId == "welcome" {
+		if *input == "1" {
+			USSDdata.Language = "en"
+		} else {
+			USSDdata.Language = "rw"
+		}
+		lang = USSDdata.Language
 	}
 	//load localizer
 	localizer = loadLocalizer(lang)
@@ -208,7 +226,7 @@ func processUSSD(input *string, phone string, sessionId string, networkOperator 
 		USSDdata.NextStepId = nextStep
 		USSDdata.StepId = nextStep
 		// fmt.Println("next step 0: ", nextStep)
-		setUssdData(*USSDdata)
+		// setUssdData(*USSDdata)
 		if validation := resItem.Validation; validation != "" {
 			funcValue := reflect.ValueOf(map[string]interface{}{
 				// Add your validation functions here
@@ -221,7 +239,10 @@ func processUSSD(input *string, phone string, sessionId string, networkOperator 
 		if action := resItem.Action; action != "" {
 			resultMessage, err = callUserFunc(action, sessionId, lang, input, phone, customer, lang, USSDdata.LastInput, networkOperator)
 			if err != nil {
-				return "", err, true
+				if len(resultMessage) == 0 {
+					return resultMessage, err, true
+				}
+				return resultMessage, err, false
 			}
 		}
 	}
@@ -238,12 +259,17 @@ func processUSSD(input *string, phone string, sessionId string, networkOperator 
 	}
 	// fmt.Println("nextStepData 0: ", viper.Get(fmt.Sprintf("steps.%v", nextStep)), fmt.Sprintf("steps.%v", nextStep))
 	nextStepData := viper.Get(fmt.Sprintf("steps.%v", nextStep)).(map[string]interface{})
-	// fmt.Println("nextStepData: ", nextStepData)
-	if err != nil {
-		// Log system bug
-		utils.LogMessage("critical", fmt.Sprintf("Next step structure not found [%v]: %v", nextStep, USSDdata), "ussd-service")
-		return "", errors.New("USSD system error"), true
+	if USSDdata.StepId == "action_ack" {
+		lang = USSDdata.Language
+		localizer = loadLocalizer(lang)
 	}
+	//load localizer
+	// fmt.Println("nextStepData: ", nextStepData)
+	// if err != nil {
+	// 	// Log system bug
+	// 	utils.LogMessage("critical", fmt.Sprintf("Next step structure not found [%v]: %v", nextStep, USSDdata), "ussd-service")
+	// 	return "", errors.New("USSD system error"), true
+	// }
 
 	msg, err := prepareMessage(nextStepData["content"].(string), lang, input, phone, sessionId, customer, networkOperator)
 	if err != nil {
@@ -300,7 +326,7 @@ func callUserFunc(functionName string, args ...interface{}) (string, error) {
 		"entrySaveCode":           entrySaveCode,
 	}[functionName])
 	if !funcValue.IsValid() {
-		return "", fmt.Errorf("invalid input: %s", functionName)
+		return "", fmt.Errorf("invalid function call: %s, arg: %v", functionName, args)
 	}
 	funcArgs := make([]reflect.Value, len(args))
 	for i, arg := range args {
@@ -310,12 +336,19 @@ func callUserFunc(functionName string, args ...interface{}) (string, error) {
 	if len(result) == 0 {
 		return "", nil
 	}
-
 	msg, ok := result[0].Interface().(string)
 	if !ok {
 		return "", errors.New("function did not return a string")
 	}
-
+	if strings.Contains(msg, "err:") {
+		return "", errors.New(strings.Split(msg, "err:")[1])
+	} else if strings.Contains(msg, "fail:") {
+		failMsg := utils.Localize(localizer, strings.Split(msg, "fail:")[1], nil)
+		return failMsg, errors.New(failMsg)
+	}
+	if len(msg) != 0 {
+		msg = utils.Localize(localizer, msg, nil)
+	}
 	return ellipsisMsg(msg, args[0].(string), args[1].(string))
 }
 func validateInputs(data []model.USSDInput, input *string) (*model.USSDInput, error) {
@@ -334,7 +367,7 @@ func validateInputs(data []model.USSDInput, input *string) (*model.USSDInput, er
 	if optional {
 		return &itemRow, nil
 	}
-	return nil, fmt.Errorf("invalid input: %s", *input)
+	return nil, fmt.Errorf("invalid input : %s", *input)
 }
 
 func prepareMessage(data string, lang string, input *string, phone string, sessionId string, customer interface{}, operator interface{}) (string, error) {
@@ -343,7 +376,11 @@ func prepareMessage(data string, lang string, input *string, phone string, sessi
 		// fmt.Println("prepareMessage action: ", action, input)
 		return callUserFunc(action, sessionId, lang, input, phone, customer, lang, operator)
 	} else {
-		msg := utils.Localize(localizer, data, nil)
+		var arg map[string]interface{} = nil
+		if data == "home_ussd" {
+			arg = map[string]interface{}{"Name": customer.(*model.Customer).Names}
+		}
+		msg := utils.Localize(localizer, data, arg)
 		return ellipsisMsg(msg, sessionId, lang)
 	}
 }
@@ -359,15 +396,21 @@ func getUssdData(sessionId string) (*model.USSDData, error) {
 	ussdData.Id = sessionId
 	return &ussdData, err
 }
-func getUssdDataItem(sessionId string, itemKey string) (map[string]interface{}, error) {
+func getUssdDataItem(sessionId string, itemKey string) (interface{}, error) {
 	// get json ussd data from redis
 	redisData, err := config.Redis.Get(ctx, "ussd:"+sessionId+"-"+itemKey).Result()
 	if err != nil {
 		return nil, err
 	}
-	ussdData := make(map[string]interface{})
-	err = json.Unmarshal([]byte(redisData), &ussdData)
-	return ussdData, err
+	if itemKey == "data" {
+		ussdData := []map[string]interface{}{}
+		err = json.Unmarshal([]byte(redisData), &ussdData)
+		return ussdData, err
+	} else {
+		ussdData := make(map[string]interface{})
+		err = json.Unmarshal([]byte(redisData), &ussdData)
+		return ussdData, err
+	}
 }
 func setUssdData(ussdData model.USSDData) error {
 	// set json ussd data to redis
@@ -378,7 +421,7 @@ func setUssdData(ussdData model.USSDData) error {
 	fmt.Println("setUssdDataItem 1: ", string(jsonData), ussdData.Id)
 	return config.Redis.Set(ctx, "ussd:"+ussdData.Id, jsonData, 120*time.Second).Err()
 }
-func setUssdDataItem(sessionId string, itemKey string, value map[string]interface{}) error {
+func setUssdDataItem(sessionId string, itemKey string, value interface{}) error {
 
 	jsonData, err := json.Marshal(value)
 	if err != nil {
@@ -387,9 +430,20 @@ func setUssdDataItem(sessionId string, itemKey string, value map[string]interfac
 	return config.Redis.Set(ctx, "ussd:"+sessionId+"-"+itemKey, jsonData, 120*time.Second).Err()
 }
 func savePreferredLang(args ...interface{}) string {
-	// Example function implementation
-	fmt.Println("savePreferredLang called with args:", args)
-	return "savePreferredLang "
+	input := args[2].(*string)
+	lang := "en"
+	if *input == "2" {
+		lang = "rw"
+	}
+	_, err := config.DB.Exec(ctx, "update customer set locale = $1 where id = $2", lang, USSDdata.CustomerId)
+	if err != nil {
+		utils.LogMessage("error", "savePreferredLang: update customer failed: err:"+err.Error(), "ussd-service")
+		return "err:system_error"
+	}
+
+	//update USSD data
+	USSDdata.Language = lang
+	return ""
 }
 
 // args: sessionId, lang, *input, phone, customer, lang, *USSDdata.LastInput, networkOperator
@@ -401,8 +455,12 @@ func preSavePreferredLang(args ...interface{}) string {
 	if *input == "2" {
 		lang = "rw"
 	}
-	appendExtraData(sessionId, extra, "preferred_lang", lang)
-	return "saved"
+	if extra == nil || reflect.ValueOf(extra).IsNil() {
+		extra = make(map[string]interface{})
+	}
+	extraData := extra.(map[string]interface{})
+	appendExtraData(sessionId, extraData, "preferred_lang", lang)
+	return ""
 }
 func appendExtraData(sessionId string, extra map[string]interface{}, key string, value string) error {
 	if len(extra) == 0 {
@@ -414,39 +472,201 @@ func appendExtraData(sessionId string, extra map[string]interface{}, key string,
 func preRegisterSaveCode(args ...interface{}) string {
 	input := args[2].(*string)
 	sessionId := args[0].(string)
+	//validate code
+	code := strings.ToUpper(*input)
+	var codeId int
+	var status string
+	err := config.DB.QueryRow(ctx, `select id,status from codes where code_hash = digest($1,'sha256')`, code).Scan(&codeId, &status)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "fail:invalid_code"
+		}
+		utils.LogMessage("error", "preRegisterSaveCode: fetch code id failed: err:"+err.Error(), "ussd-service")
+		return "fail:system_error"
+	}
+	if status != "unused" {
+		return "fail:inactive_code"
+	}
 	extra, _ := getUssdDataItem(sessionId, "extra")
-	appendExtraData(sessionId, extra, "code", *input)
-	return "saved"
+	extraData := extra.(map[string]interface{})
+	appendExtraData(sessionId, extraData, "code", *input)
+	appendExtraData(sessionId, extraData, "code_id", fmt.Sprintf("%v", codeId))
+	return ""
 }
 func getProvince(args ...interface{}) string {
-	// Example function implementation
-	return "getProvince "
+	sessionId := args[0].(string)
+	//fetch all provinces from db
+	rows, err := config.DB.Query(ctx, "select id,name from province")
+	if err != nil {
+		utils.LogMessage("error", "getProvince: fetch rows failed: err:"+err.Error(), "ussd-service")
+		return "System error. Please try again later."
+	}
+	defer rows.Close()
+	provinces := []model.Province{}
+	provincesText := ""
+	a := 1
+	for rows.Next() {
+		province := model.Province{}
+		err := rows.Scan(&province.Id, &province.Name)
+		if err != nil {
+			utils.LogMessage("error", "getProvince: scan row failed: err:"+err.Error(), "ussd-service")
+			return "System error. Please try again later."
+		}
+		provinces = append(provinces, province)
+		provincesText += fmt.Sprintf("%v) %s\n", a, province.Name)
+		a++
+	}
+	setUssdDataItem(sessionId, "data", provinces)
+	return utils.Localize(localizer, "select_province", map[string]interface{}{"Provinces": provincesText})
 }
 func preRegisterSaveProvince(args ...interface{}) string {
-	// Example function implementation
-	return "preRegisterSaveProvince "
+	input := args[2].(*string)
+	sessionId := args[0].(string)
+	data, _ := getUssdDataItem(sessionId, "data")
+	provinces := data.([]map[string]interface{})
+	//check if input is a number
+	inputId := 0
+	if num, err := strconv.Atoi(*input); err == nil {
+		inputId = num
+	} else {
+		return "err:input_must_number"
+	}
+	province := provinces[(inputId - 1)]
+	fmt.Println("selected province: ", province)
+	extra, _ := getUssdDataItem(sessionId, "extra")
+	extraData := extra.(map[string]interface{})
+	appendExtraData(sessionId, extraData, "province", fmt.Sprintf("%v", province["Id"]))
+	return ""
 }
 func getDistrict(args ...interface{}) string {
-	// Example function implementation
-	return "getDistrict "
+	sessionId := args[0].(string)
+	extra, _ := getUssdDataItem(sessionId, "extra")
+	extraData := extra.(map[string]interface{})
+	provinceId, ok := extraData["province"]
+	if !ok {
+		return "err:province_not_selected"
+	}
+	//fetch all provinces from db
+	rows, err := config.DB.Query(ctx, "select id,name from district where province_id=$1", provinceId)
+	if err != nil {
+		utils.LogMessage("error", "getDistrict: fetch rows failed: err:"+err.Error(), "ussd-service")
+		return "System error. Please try again later."
+	}
+	defer rows.Close()
+	districts := []model.District{}
+	districtText := ""
+	a := 1
+	for rows.Next() {
+		district := model.District{}
+		err := rows.Scan(&district.Id, &district.Name)
+		if err != nil {
+			utils.LogMessage("error", "getDistrict: scan row failed: err:"+err.Error(), "ussd-service")
+			return "System error. Please try again later."
+		}
+		districts = append(districts, district)
+		districtText += fmt.Sprintf("%v) %s\n", a, district.Name)
+		a++
+	}
+	setUssdDataItem(sessionId, "data", districts)
+	return utils.Localize(localizer, "select_district", map[string]interface{}{"Districts": districtText})
 }
-func completeRegistration(args ...interface{}) string {
-	// Example function implementation
-	return "completeRegistration "
+func action_completed(args ...interface{}) string {
+	return "success_entry"
 }
 func preRegisterSaveName(args ...interface{}) string {
 	// Example function implementation
 	input := args[2].(*string)
 	sessionId := args[0].(string)
 	extra, _ := getUssdDataItem(sessionId, "extra")
-	appendExtraData(sessionId, extra, "name", *input)
-	return "saved"
+	extraData := extra.(map[string]interface{})
+	appendExtraData(sessionId, extraData, "name", *input)
+	return ""
 }
-func action_completed(args ...interface{}) string {
-	// Example function implementation
-	return "action_completed "
+
+// get district and save customer
+func completeRegistration(args ...interface{}) string {
+	input := args[2].(*string)
+	sessionId := args[0].(string)
+	data, _ := getUssdDataItem(sessionId, "data")
+	districts := data.([]map[string]interface{})
+	//check if input is a number
+	inputId := 0
+	if num, err := strconv.Atoi(*input); err == nil {
+		inputId = num
+	} else {
+		return "err:input_must_number"
+	}
+	district := districts[(inputId - 1)]
+	fmt.Println("selected district: ", district)
+	extra, _ := getUssdDataItem(sessionId, "extra")
+	extraData := extra.(map[string]interface{})
+	provinceId := extraData["province"]
+	name := extraData["name"]
+	var customerId int
+	fmt.Println("completeRegistration: ", name, config.EncryptionKey, args[3].(string), provinceId, district["Id"], extraData["preferred_lang"], args[7].(string))
+	err := config.DB.QueryRow(ctx, `insert into customer (names,phone,phone_hash,province,district,locale, network_operator) values
+	(pgp_sym_encrypt($1,$2),pgp_sym_encrypt($3,$2)::bytea,digest($3,'sha256')::bytea,$4,$5,$6,$7) returning id`,
+		name, config.EncryptionKey, args[3].(string), provinceId, district["Id"], extraData["preferred_lang"], args[7].(string)).Scan(&customerId)
+	if err != nil {
+		utils.LogMessage("error", "completeRegistration: insert customer failed: err:"+err.Error(), "ussd-service")
+		return "err:system_error"
+	}
+	//create entry record
+	_, err = config.DB.Exec(ctx, `insert into entries (customer_id,code_id) values ($1,$2)`, customerId, extraData["code_id"])
+	if err != nil {
+		//delete customer
+		removeCustomer(customerId)
+		utils.LogMessage("error", "completeRegistration: insert entries failed: err:"+err.Error(), "ussd-service")
+		return "err:system_error"
+	}
+	//create entry record
+	_, err = config.DB.Exec(ctx, `update codes set status = 'used' where id = $1`, extraData["code_id"])
+	if err != nil {
+		//delete customer
+		removeCustomer(customerId)
+		//delete entry
+		_, err = config.DB.Exec(ctx, `delete from entries where customer_id = $1 and code_id=$2`, customerId, extraData["code_id"])
+		utils.LogMessage("error", "completeRegistration: insert entry failed: err:"+err.Error(), "ussd-service")
+		return "err:system_error"
+	}
+	//TODO: instant prize
+	return "success_entry"
+}
+func removeCustomer(customerId int) {
+	_, err := config.DB.Exec(ctx, `delete from customer where id = $1`, customerId)
+	if err != nil {
+		utils.LogMessage("error", "removeCustomer: delete customer failed: err:"+err.Error(), "ussd-service")
+	}
 }
 func entrySaveCode(args ...interface{}) string {
-	// Example function implementation
-	return "entrySaveCode "
+	input := args[2].(*string)
+	var codeId int
+	var status string
+	err := config.DB.QueryRow(ctx, `select id,status from codes where code_hash = digest($1,'sha256')`, input).Scan(&codeId, &status)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "fail:invalid_code"
+		}
+		utils.LogMessage("error", "preRegisterSaveCode: fetch code id failed: err:"+err.Error(), "ussd-service")
+		return "fail:system_error"
+	}
+	if status != "unused" {
+		return "fail:inactive_code"
+	}
+	//create entry record
+	_, err = config.DB.Exec(ctx, `insert into entries (customer_id,code_id) values ($1,$2)`, USSDdata.CustomerId, codeId)
+	if err != nil {
+		//delete customerY
+		utils.LogMessage("error", "entrySaveCode: insert entries failed: err:"+err.Error(), "ussd-service")
+		return "err:system_error"
+	}
+	//create entry record
+	_, err = config.DB.Exec(ctx, `update codes set status = 'used' where id = $1`, codeId)
+	if err != nil {
+		//delete entry
+		_, err = config.DB.Exec(ctx, `delete from entries where customer_id = $1 and code_id=$2`, USSDdata.CustomerId, codeId)
+		utils.LogMessage("error", "entrySaveCode: insert entry failed: err:"+err.Error(), "ussd-service")
+		return "err:system_error"
+	}
+	return ""
 }

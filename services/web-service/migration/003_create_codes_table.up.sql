@@ -1,7 +1,7 @@
 CREATE TABLE IF NOT EXISTS codes (
     id SERIAL PRIMARY KEY,
     code BYTEA NOT NULL,
-    code_hash VARCHAR(255) NOT NULL,
+    code_hash BYTEA NOT NULL,
     instant_prize BOOLEAN DEFAULT FALSE,
     status VARCHAR(50),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
