@@ -2,7 +2,7 @@ CREATE TABLE IF NOT EXISTS customer (
     id SERIAL PRIMARY KEY,
     names BYTEA NOT NULL,
     phone BYTEA NOT NULL,
-    phone_hash BYTEA NOT NULL,
+    phone_hash BYTEA NOT NULL UNIQUE,
     network_operator VARCHAR(20),
     locale VARCHAR(20) DEFAULT 'en',
     province  INT REFERENCES province(id),

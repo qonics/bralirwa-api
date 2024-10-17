@@ -3,7 +3,7 @@ CREATE TABLE IF NOT EXISTS users(
    fname text,
    lname text,
    phone text,
-   email text,
+   email text UNIQUE,
    department_id INT REFERENCES departments(id),
    email_verified BOOLEAN,
    phone_verified BOOLEAN,

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"shared-package/utils"
 	"time"
 
 	"github.com/golang-migrate/migrate/v4"
@@ -15,7 +16,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-var SESSION *pgxpool.Pool
+var DB *pgxpool.Pool
 
 func ConnectDb() {
 	// Read configuration from environment variables
@@ -57,7 +58,7 @@ func ConnectDb() {
 	}
 
 	// Assign to global variable
-	SESSION = pool
+	DB = pool
 
 	log.Println("Database connected and ready for application use!")
 }
@@ -71,7 +72,9 @@ func runMigrations(db *sql.DB) {
 
 	// Define the path to your migrations folder
 	migrationDir := "file://app/migration"
-
+	if utils.IsTestMode {
+		migrationDir = "file://../migration"
+	}
 	// Create a new migrator instance
 	migrator, err := migrate.NewWithDatabaseInstance(migrationDir, "postgres", driver)
 	if err != nil {

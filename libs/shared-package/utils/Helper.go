@@ -4,15 +4,21 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	mathRand "math/rand"
 	"os"
+	"reflect"
+	"regexp"
 	"shared-package/proto"
+	"strings"
 	"time"
 	"unsafe"
+	"web-service/model"
 
+	"github.com/go-redis/redis/v8"
 	"github.com/gofiber/fiber/v2"
 	"github.com/nicksnyder/go-i18n/v2/i18n"
 	"github.com/spf13/viper"
@@ -23,6 +29,8 @@ import (
 
 var IsTestMode bool = false
 var ctx = context.Background()
+
+// var ctx = context.Background()
 var SessionExpirationTime time.Duration = 1800
 var CachePrefix string = "CACHE_MANAGER_"
 
@@ -32,6 +40,22 @@ const (
 	letterIdxMask = 1<<letterIdxBits - 1 // All 1-bits, as many as letterIdxBits
 	letterIdxMax  = 63 / letterIdxBits   // # of letter indices fitting in 63 bits
 )
+
+// Define the LogLevel type as a string
+type LogLevel string
+
+const (
+	INFO     LogLevel = "INFO"
+	DEBUG    LogLevel = "DEBUG"
+	ERROR    LogLevel = "ERROR"
+	CRITICAL LogLevel = "CRITICAL"
+)
+
+type Logger struct {
+	LogLevel    LogLevel
+	Message     string
+	ServiceName string
+}
 
 func RandString(n int) string {
 	var src = mathRand.NewSource(time.Now().UnixNano())
@@ -82,6 +106,8 @@ func InitializeViper(configName string, configType string) {
 	}
 	viper.AutomaticEnv()
 	viper.SetConfigType(configType)
+	// Map the environment variable POSTGRES_DB_PASSWORD to the config path postgres_db.password
+	viper.BindEnv("postgres_db.password", "POSTGRES_DB_PASSWORD")
 	if viper.AllKeys() == nil {
 		if err := viper.ReadInConfig(); err != nil {
 			log.Fatal("Error reading config file, ", err)
@@ -126,6 +152,8 @@ func LogMessage(logLevel string, message string, service string, forcedTraceId .
 
 func USSDResponse(c *fiber.Ctx, networkCode string, action string, message string) error {
 	if networkCode == "MTN" {
+		return c.JSON(fiber.Map{"action": action, "message": message})
+	} else if networkCode == "MTN2" {
 		c.Set("Content-Type", "text/plain")
 		c.Set("Freeflow", action)
 		c.Set("Cache-Control", "max-age=0")
@@ -146,7 +174,7 @@ func USSDResponse(c *fiber.Ctx, networkCode string, action string, message strin
 		c.SendString(message)
 		return nil
 	}
-	LogMessage("error", "USSDResponse: Invalid network code, "+networkCode, "ussd-service")
+	LogMessage("error", "USSDResponse: Invalid network code, code:"+networkCode, "ussd-service")
 	return errors.New("invalid network code")
 }
 
@@ -160,4 +188,151 @@ func Localize(localizer *i18n.Localizer, messageID string, templateData map[stri
 		return messageID
 	}
 	return msg
+}
+
+// check if item Exist in string slice
+func ContainsString(slice []string, value string) bool {
+	for _, v := range slice {
+		if v == value {
+			return true
+		}
+	}
+	return false
+}
+
+// return json response and save logs if logger container 1 or more data
+func JsonErrorResponse(c *fiber.Ctx, responseStatus int, message string, logger ...Logger) error {
+	c.SendStatus(responseStatus)
+	traceId := ""
+	//save logs if it is available
+	for _, log := range logger {
+		logId := LogMessage(string(log.LogLevel), log.Message, log.ServiceName, traceId)
+		//update traceId once it is empty only, then other logs will use that traceId
+		if traceId == "" {
+			traceId = logId
+		}
+	}
+	publicMessage := message
+	//never show actual system error as per AOWSAP code: AOW-5001 (Internal Server Error (Public-Facing Generic Message))
+	if responseStatus >= 500 {
+		if len(message) < 3 {
+			publicMessage = "Our apologies, something went wrong. Please try again in a little while. Trace_id: " + traceId
+		} else {
+			publicMessage = fmt.Sprintf("%s, Sorry for the inconvenience! Please give it another go in a bit. Trace_id: %s", message, traceId)
+		}
+	} else if traceId != "" {
+		publicMessage = fmt.Sprintf("%s Trace_id: %s", message, traceId)
+	}
+	return c.JSON(fiber.Map{"status": responseStatus, "message": publicMessage, "trace_id": traceId})
+}
+func ValidateString(s string, ignoreChars ...string) bool {
+	if s == "" {
+		return false
+	}
+
+	disallowedChars := `'£$%&*()}{#~?><>,/|=_+¬`
+	for _, char := range ignoreChars {
+		disallowedChars = strings.Replace(disallowedChars, char, "", -1)
+	}
+
+	disallowedPattern := "[" + regexp.QuoteMeta(disallowedChars) + "]"
+	re := regexp.MustCompile(disallowedPattern)
+	return re.MatchString(s)
+}
+
+// loop through struct value and validate each for unwanted special characters
+//
+// Args:
+//
+//	data (interface{}): a struct you want to validate
+//	ignoreChars ([]string) (optional): List of ignored characters
+//	ignoredKeys ([]string) (optional): List of ignored keys, and you must pass ignoreChars as an empty slice if it is not needed
+//
+// Returns:
+//
+//	map[string]bool: a map of keys with invalid special characters and with true as value
+//
+// Examples:
+//
+//	ValidateStruct(data)
+//	ValidateStruct(data, []string{"=","\\"}) // exclude = and \
+//	ValidateStruct(data, []string{}, []string{"Password"}) // exclude Password key from validation
+func ValidateStruct(data interface{}, extra ...[]string) map[string]bool {
+	results := make(map[string]bool)
+	val := reflect.ValueOf(data).Elem()
+	ignoredKeys, ignoreChars := []string{}, []string{}
+	if len(extra) > 0 {
+		ignoreChars = extra[0]
+	}
+	if len(extra) > 1 {
+		ignoredKeys = extra[1]
+	}
+	for i := 0; i < val.NumField(); i++ {
+		field := val.Field(i)
+		keyName := val.Type().Field(i).Name
+		if ContainsString(ignoredKeys, keyName) {
+			continue
+		}
+		if field.Kind() == reflect.String {
+			str := field.String()
+			valid := ValidateString(str, ignoreChars...)
+			if valid {
+				results[keyName] = valid
+			}
+		}
+	}
+	return results
+}
+
+// Genereate a message from ValidateStruct response
+//
+// Args:
+//
+//	data (map[string]bool): The response returned from ValidateStruct.
+//
+// Returns:
+//
+//	*string: An error message from validation map.
+func ValidateStructText(data map[string]bool) *string {
+	text := ""
+	for a := range data {
+		text += fmt.Sprintf("%s contains unsupported characters<br />", a)
+	}
+	if text == "" {
+		return nil
+	}
+	return &text
+}
+func SecurePath(c *fiber.Ctx, redis *redis.Client) (*model.UserProfile, error) {
+	authHeader := c.Get("Authorization")
+	if authHeader == "" {
+		authHeader = c.Get("authorization")
+	}
+	authHeader = strings.ReplaceAll(authHeader, "Bearer ", "")
+	responseStatus := fiber.StatusUnauthorized
+	if authHeader == "" {
+		c.SendStatus(responseStatus)
+		return nil, errors.New("unauthorized: You are not allowed to access this resource")
+	}
+	client := []byte(redis.Get(ctx, authHeader).Val())
+	if client == nil {
+		isLogout := c.Locals("isLogout")
+		if isLogout != nil && isLogout.(bool) {
+			c.SendStatus(fiber.StatusOK)
+			return nil, errors.New("already logged out")
+		}
+		c.SendStatus(responseStatus)
+		return nil, errors.New("token not found or expired")
+	}
+	var logger model.UserProfile
+	err := json.Unmarshal(client, &logger)
+	if err != nil {
+		c.SendStatus(responseStatus)
+		fmt.Println("authentication failed, invalid token: ", err.Error(), "Data:", client)
+		return nil, errors.New("authentication failed, invalid token." + err.Error())
+	}
+
+	redis.Expire(ctx, authHeader, time.Duration(SessionExpirationTime*time.Minute))
+	logger.AccessToken = authHeader
+	return &logger, nil
 }

@@ -1,4 +1,5 @@
 APP_BINARY = app-release
+t = latest
 
 ## up: starts all containers in the background without forcing build
 up:
@@ -63,3 +64,18 @@ logger-service:
 	cd ./services/logger-service/controller && go test -v
 	cd ./services/logger-service && env GOOS=linux CGO_ENABLED=0 go build -o ${APP_BINARY}
 	@echo "Done!"
+
+deploy: $(s)
+	@echo "Building and deploying single service:" $(s)
+	docker compose build $(s)
+	@echo "Tag single service:" $(s)
+	docker tag bralirwa-api-$(s) qonicsinc/lottery-$(s):$(t)
+	@echo "Pushing image to docker hub" $(s)
+	docker push qonicsinc/lottery-$(s):$(t)
+	@if [ "$(t)" != "latest" ]; then \
+		echo "Build also latest image"; \
+		docker tag bralirwa-api-$(s) qonicsinc/lottery-$(s):latest; \
+		echo "Push latest image"; \
+		docker push qonicsinc/lottery-"$(s)":latest; \
+	fi
+	@echo $(s) "image pushed"

@@ -1,0 +1,24 @@
+apiVersion: "acid.zalan.do/v1"
+kind: postgresql
+metadata:
+  name: postgres
+spec:
+  teamId: "qonics"
+  volume:
+    size: 1Gi
+  numberOfInstances: 1
+  users:
+    postgres:  # database owner
+    - superuser
+    - createdb
+    foo_user: []  # role for application foo
+  databases:
+    lottery_db: postgres  # dbname: owner
+  preparedDatabases:
+    bar: {}
+  postgresql:
+    version: "16"
+  patroni:
+    pg_hba:
+    - host all all 0.0.0.0/0 md5  # Allow connections from any IP address using md5 encryption
+    - local all postgres md5
