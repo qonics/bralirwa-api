@@ -42,5 +42,18 @@ func InitRoutes() *fiber.App {
 	v1.Post("/login", controller.LoginWithEmail)
 	v1.Get("/profile", controller.GetUserProfile)
 
+	v1.Get("/prize_categories", controller.GetPrizeCategory)
+	v1.Get("/prize_type/:prize_category?", controller.GetPrizeType)
+	v1.Get("/prizes", controller.GetPrizeType)
+	v1.Post("/prize_category", controller.CreatePrizeCategory)
+	v1.Post("/prize_type", controller.CreatePrizeType)
+	v1.Post("/draw", controller.CreatePrizeType)
+	v1.Get("/entries", controller.GetEntries)
+	v1.Get("/draws", controller.GetDraws)
+	v1.Get("/prize_distributions", controller.GetUserProfile)
+	v1.Get("/customer/:customerId", controller.GetUserProfile)
+	v1.Get("/customer_entry_history/:customerId", controller.GetUserProfile)
+	v1.Post("/upload_codes", controller.GetUserProfile)
+
 	return app
 }

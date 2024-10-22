@@ -9,6 +9,7 @@ services:
       - ./krakend.json:/etc/krakend/krakend.json
     networks:
       - local-net
+    restart: always
 
   postgres:
     image: postgres:17.0

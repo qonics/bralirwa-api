@@ -8,7 +8,9 @@ import (
 	"net/http/httptest"
 	"shared-package/utils"
 	"testing"
+	"time"
 	"web-service/config"
+	"web-service/model"
 
 	"github.com/go-redis/redis/v8"
 	"github.com/gofiber/fiber/v2"
@@ -16,6 +18,63 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func init() {
+	utils.IsTestMode = true
+	viper.Set("saltKey", "testSaltKey")
+	utils.IsTestMode = true
+	utils.InitializeViper("config", "yml")
+	viper.Set("saltKey", "testSaltKey")
+	//set the test db config
+	viper.Set("postgres_db.cluster", "127.0.0.1")
+	viper.Set("postgres_db.keyspace", "lottery_db")
+	viper.Set("postgres_db.password", viper.GetString("postgres_db_test.password"))
+	config.ConnectDb()
+	config.Redis = redis.NewClient(&redis.Options{
+		Addr:     fmt.Sprintf("%s:%s", viper.GetString("redis_test.host"), viper.GetString("redis_test.port")),
+		Password: viper.GetString("redis_test.password"),
+		DB:       viper.GetInt("redis_test.database"),
+	})
+	//Create dummy users for testing
+	config.DB.Exec(ctx, `INSERT INTO users (fname, lname, phone, email, can_add_codes,can_trigger_draw,can_add_user,can_view_logs, department_id, email_verified, phone_verified, locale, avatar_url, password, status, address, operator)
+VALUES
+('Admin', 'User test', 'NOT_AVAILABLE', 'test@qonics.com', true, true, true, true, 1, FALSE, FALSE, 'en', 'NOT_AVAILABLE',
+ '$2a$06$GeEpPxbKoTn3tAkyufWilumzne1MvF4uw0Vl7/X/VsZ4DM.r3zWRi', 'OKAY', 'NOT_AVAILABLE', NULL);`)
+	config.DB.Exec(ctx, `INSERT INTO users (fname, lname, phone, email, can_add_codes,can_trigger_draw,can_add_user,can_view_logs, department_id, email_verified, phone_verified, locale, avatar_url, password, status, address, operator)
+VALUES
+('Admin', 'User test 2', 'NOT_AVAILABLE', 'test2@qonics.com', false, false, false, true, 1, FALSE, FALSE, 'en', 'NOT_AVAILABLE',
+ '$2a$06$GeEpPxbKoTn3tAkyufWilumzne1MvF4uw0Vl7/X/VsZ4DM.r3zWRi', 'OKAY', 'NOT_AVAILABLE', NULL);`)
+	// save prize category
+	config.DB.Exec(ctx, `INSERT INTO prize_category (id,name, status) VALUES (1,'Test Category 1', 'OKAY');`)
+	config.DB.Exec(ctx, `INSERT INTO prize_category (id,name, status) VALUES (2,'Test Category 2', 'OKAY');`)
+	// save prize type
+	config.DB.Exec(ctx, `INSERT INTO prize_type (id,name, prize_category_id, value, elligibility, status) VALUES (1,'Test Prize 1', 1, 100, 1, 'OKAY');`)
+	config.DB.Exec(ctx, `INSERT INTO prize_type (id,name, prize_category_id, value, elligibility, status) VALUES (2,'Test Prize 2', 1, 200, 5, 'OKAY');`)
+	config.DB.Exec(ctx, `INSERT INTO prize_type (id,name, prize_category_id, value, elligibility, status) VALUES (3,'Test Prize 3', 2, 100, 2, 'OKAY');`)
+
+}
+
+func createTestAccessToken() string {
+	userData := model.UserProfile{
+		Id:             1,
+		Fname:          "Test",
+		Lname:          "user",
+		Email:          "test@qonics.com",
+		CanAddCodes:    true,
+		CanTriggerDraw: true,
+		CanAddUser:     true,
+		CanViewLogs:    true,
+		Status:         "OKAY",
+	}
+	payloadData, err := json.Marshal(userData)
+	if err != nil {
+		panic("Unable to marshal struct into json")
+	}
+	token := "dG9rZW5fYzM5MThmNjItMWM0Ny0xMWVmLWE5NjUtMDI0MjBhMTQwMDA2XzE3MTY5NjU4NTY5NjS"
+	if err := config.Redis.Set(ctx, token, payloadData, time.Duration(10*time.Minute)).Err(); err != nil {
+		panic(fmt.Sprintf("unable to save user access token for user %d , error: %s", userData.Id, err.Error()))
+	}
+	return token
+}
 func TestLoginWithEmail(t *testing.T) {
 	// Setup Fiber app
 	app := fiber.New()
@@ -106,30 +165,392 @@ func TestLoginWithEmail(t *testing.T) {
 	}
 }
 
-// Mock configurations
-func init() {
-	utils.IsTestMode = true
-	viper.Set("saltKey", "testSaltKey")
-	utils.IsTestMode = true
-	utils.InitializeViper("config", "yml")
-	viper.Set("saltKey", "testSaltKey")
-	//set the test db config
-	viper.Set("postgres_db.cluster", "127.0.0.1")
-	viper.Set("postgres_db.keyspace", "lottery_db")
-	viper.Set("postgres_db.password", viper.GetString("postgres_db_test.password"))
-	config.ConnectDb()
-	config.Redis = redis.NewClient(&redis.Options{
-		Addr:     fmt.Sprintf("%s:%s", viper.GetString("redis_test.host"), viper.GetString("redis_test.port")),
-		Password: viper.GetString("redis_test.password"),
-		DB:       viper.GetInt("redis_test.database"),
-	})
-	//Create dummy users for testing
-	config.DB.Exec(ctx, `INSERT INTO users (fname, lname, phone, email, can_add_codes,can_trigger_draw,can_add_user,can_view_logs, department_id, email_verified, phone_verified, locale, avatar_url, password, status, address, operator)
-VALUES
-('Admin', 'User test', 'NOT_AVAILABLE', 'test@qonics.com', true, true, true, true, 1, FALSE, FALSE, 'en', 'NOT_AVAILABLE',
- '$2a$06$GeEpPxbKoTn3tAkyufWilumzne1MvF4uw0Vl7/X/VsZ4DM.r3zWRi', 'OKAY', 'NOT_AVAILABLE', NULL);`)
-	config.DB.Exec(ctx, `INSERT INTO users (fname, lname, phone, email, can_add_codes,can_trigger_draw,can_add_user,can_view_logs, department_id, email_verified, phone_verified, locale, avatar_url, password, status, address, operator)
-VALUES
-('Admin', 'User test 2', 'NOT_AVAILABLE', 'test2@qonics.com', false, false, false, true, 1, FALSE, FALSE, 'en', 'NOT_AVAILABLE',
- '$2a$06$GeEpPxbKoTn3tAkyufWilumzne1MvF4uw0Vl7/X/VsZ4DM.r3zWRi', 'OKAY', 'NOT_AVAILABLE', NULL);`)
+func TestGetPrizeCategory(t *testing.T) {
+	access_token := createTestAccessToken()
+	// Setup Fiber app
+	app := fiber.New()
+	// Define the route
+	app.Get("/prize_categories", GetPrizeCategory)
+
+	// Initialize the assert object
+	a := assert.New(t)
+
+	// Run the test
+	req := httptest.NewRequest("GET", "/prize_categories", nil)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", access_token)
+
+	resp, _ := app.Test(req, -1)
+	// Check the status code
+	a.Equal(fiber.StatusOK, resp.StatusCode)
+
+	// Read the response body
+	body, _ := io.ReadAll(resp.Body)
+	var result map[string]interface{}
+	json.Unmarshal(body, &result)
+	// Check each field
+	if resp.StatusCode == 200 {
+		singleRecord, ok := result["data"].([]interface{})
+		a.True(ok, "data should be an array")
+		if len(singleRecord) != 0 {
+			dataRecord, ok := singleRecord[0].(map[string]interface{})
+			a.True(ok, "dataRecord should be a map")
+			a.NotEmpty(dataRecord["id"], "id")
+			a.NotEmpty(dataRecord["name"], "name")
+			a.NotEmpty(dataRecord["status"], "status")
+			a.NotEmpty(dataRecord["created_at"], "created_at")
+		}
+	}
+}
+func TestGetPrizeType(t *testing.T) {
+	access_token := createTestAccessToken()
+	// Setup Fiber app
+	app := fiber.New()
+	// Define the route
+	app.Get("/prize_type/:prize_category?", GetPrizeType)
+
+	// Initialize the assert object
+	a := assert.New(t)
+
+	// Run the test
+	req := httptest.NewRequest("GET", "/prize_type", nil)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", access_token)
+
+	resp, _ := app.Test(req, -1)
+	// Check the status code
+	a.Equal(fiber.StatusOK, resp.StatusCode)
+
+	// Read the response body
+	body, _ := io.ReadAll(resp.Body)
+	var result map[string]interface{}
+	json.Unmarshal(body, &result)
+	// Check each field
+	if resp.StatusCode == 200 {
+		singleRecord, ok := result["data"].([]interface{})
+		a.True(ok, "data should be an array")
+		if len(singleRecord) != 0 {
+			dataRecord, ok := singleRecord[0].(map[string]interface{})
+			a.True(ok, "dataRecord should be a map")
+			a.NotEmpty(dataRecord["id"], "id")
+			a.NotEmpty(dataRecord["name"], "name")
+			a.NotEmpty(dataRecord["value"], "value")
+			a.NotEmpty(dataRecord["elligibility"], "elligibility")
+			a.NotEmpty(dataRecord["created_at"], "created_at")
+			a.NotEmpty(dataRecord["status"], "status")
+		}
+	}
+}
+func TestGetPrizeTypeByCategory(t *testing.T) {
+	access_token := createTestAccessToken()
+	// Setup Fiber app
+	app := fiber.New()
+	// Define the route
+	app.Get("/prize_type/:prize_category?", GetPrizeType)
+
+	// Initialize the assert object
+	a := assert.New(t)
+
+	// Run the test
+	req := httptest.NewRequest("GET", "/prize_type/1", nil)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", access_token)
+
+	resp, _ := app.Test(req, -1)
+	// Check the status code
+	a.Equal(fiber.StatusOK, resp.StatusCode)
+
+	// Read the response body
+	body, _ := io.ReadAll(resp.Body)
+	var result map[string]interface{}
+	json.Unmarshal(body, &result)
+	// Check each field
+	if resp.StatusCode == 200 {
+		singleRecord, ok := result["data"].([]interface{})
+		a.True(ok, "data should be an array")
+		if len(singleRecord) == 0 {
+			t.Fatal("prize type should not be empty")
+		}
+		dataRecord, ok := singleRecord[0].(map[string]interface{})
+		a.True(ok, "dataRecord should be a map")
+		a.NotEmpty(dataRecord["id"], "id")
+		a.Equal(dataRecord["name"], "Test Prize 1", "name")
+		a.NotEmpty(dataRecord["value"], "value")
+		a.NotEmpty(dataRecord["elligibility"], "elligibility")
+		a.NotEmpty(dataRecord["created_at"], "created_at")
+		a.NotEmpty(dataRecord["status"], "status")
+	}
+}
+
+func TestGetEntries(t *testing.T) {
+	access_token := createTestAccessToken()
+	// Setup Fiber app
+	app := fiber.New()
+	// Define the route
+	app.Get("/entries", GetEntries)
+
+	// Initialize the assert object
+	a := assert.New(t)
+
+	// Run the test
+	req := httptest.NewRequest("GET", "/entries", nil)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", access_token)
+
+	resp, _ := app.Test(req, -1)
+	// Check the status code
+	a.Equal(fiber.StatusOK, resp.StatusCode)
+
+	// Read the response body
+	body, _ := io.ReadAll(resp.Body)
+	var result map[string]interface{}
+	json.Unmarshal(body, &result)
+	// Check each field
+	if resp.StatusCode == 200 {
+		singleRecord, ok := result["data"].([]interface{})
+		a.True(ok, "data should be an array")
+		if len(singleRecord) != 0 {
+			dataRecord, ok := singleRecord[0].(map[string]interface{})
+			a.True(ok, "dataRecord should be a map")
+			a.NotEmpty(dataRecord["id"], "id")
+			a.NotEmpty(dataRecord["name"], "name")
+			a.NotEmpty(dataRecord["code"], "code")
+			a.NotEmpty(dataRecord["customer"], "customer")
+			a.NotEmpty(dataRecord["created_at"], "created_at")
+		}
+	}
+}
+func TestGetDraws(t *testing.T) {
+	access_token := createTestAccessToken()
+	// Setup Fiber app
+	app := fiber.New()
+	// Define the route
+	app.Get("/draws", GetDraws)
+
+	// Initialize the assert object
+	a := assert.New(t)
+
+	// Run the test
+	req := httptest.NewRequest("GET", "/draws", nil)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", access_token)
+
+	resp, _ := app.Test(req, -1)
+	// Check the status code
+	a.Equal(fiber.StatusOK, resp.StatusCode)
+
+	// Read the response body
+	body, _ := io.ReadAll(resp.Body)
+	fmt.Println(string(body))
+	var result map[string]interface{}
+	json.Unmarshal(body, &result)
+	// Check each field
+	if resp.StatusCode == 200 {
+		singleRecord, ok := result["data"].([]interface{})
+		a.True(ok, "data should be an array")
+		if len(singleRecord) != 0 {
+			dataRecord, ok := singleRecord[0].(map[string]interface{})
+			a.True(ok, "dataRecord should be a map")
+			a.NotEmpty(dataRecord["id"], "id")
+			a.NotEmpty(dataRecord["prize_type"], "prize_type")
+			a.NotEmpty(dataRecord["code"], "code")
+			a.NotEmpty(dataRecord["customer"], "customer")
+			a.NotEmpty(dataRecord["created_at"], "created_at")
+		}
+	}
+}
+func TestGetPrizes(t *testing.T) {
+	access_token := createTestAccessToken()
+	// Setup Fiber app
+	app := fiber.New()
+	// Define the route
+	app.Get("/prizes", GetPrizes)
+
+	// Initialize the assert object
+	a := assert.New(t)
+
+	// Run the test
+	req := httptest.NewRequest("GET", "/prizes", nil)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", access_token)
+
+	resp, _ := app.Test(req, -1)
+	// Check the status code
+	a.Equal(fiber.StatusOK, resp.StatusCode)
+
+	// Read the response body
+	body, _ := io.ReadAll(resp.Body)
+	var result map[string]interface{}
+	json.Unmarshal(body, &result)
+	// Check each field
+	if resp.StatusCode == 200 {
+		singleRecord, ok := result["data"].([]interface{})
+		a.True(ok, "data should be an array")
+		if len(singleRecord) != 0 {
+			dataRecord, ok := singleRecord[0].(map[string]interface{})
+			a.True(ok, "dataRecord should be a map")
+			a.NotEmpty(dataRecord["id"], "id")
+			a.NotEmpty(dataRecord["value"], "value")
+			a.NotEmpty(dataRecord["category"], "category")
+			a.NotEmpty(dataRecord["customer"], "customer")
+			a.NotEmpty(dataRecord["created_at"], "created_at")
+		}
+	}
+}
+
+func TestCreatePrizeCategory(t *testing.T) {
+	access_token := createTestAccessToken()
+	// Setup Fiber app
+	app := fiber.New()
+	// Define the route
+	app.Post("/prize_category", CreatePrizeCategory)
+	uniqueName := fmt.Sprintf("CASH-%d", time.Now().Unix())
+	fmt.Println("uniqueName", uniqueName)
+	// Test cases
+	tests := []struct {
+		description  string
+		payload      map[string]any
+		expectedCode int
+		expectedData map[string]interface{} // expected data for detailed field checking
+	}{
+		{
+			description: "Success",
+			payload: map[string]any{
+				"name": uniqueName,
+			},
+			expectedCode: 200,
+			expectedData: map[string]interface{}{
+				"status":  200,
+				"message": "Registration completed",
+			},
+		},
+		{
+			description: "Duplicate",
+			payload: map[string]any{
+				"name": uniqueName,
+			},
+			expectedCode: 409,
+			expectedData: map[string]interface{}{
+				"status":  409,
+				"message": "duplicate",
+			},
+		},
+		{
+			description: "Invalid name",
+			payload: map[string]any{
+				"name": "CAR%as",
+			},
+			expectedCode: 406,
+		},
+		{
+			description:  "required field",
+			expectedCode: 400,
+		},
+	}
+
+	// Initialize the assert object
+	a := assert.New(t)
+
+	// Run the tests
+	for _, test := range tests {
+		reqBody, _ := json.Marshal(test.payload)
+		req := httptest.NewRequest("POST", "/prize_category", bytes.NewReader(reqBody))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", access_token)
+
+		resp, _ := app.Test(req, -1)
+		// Check the status code
+		a.Equal(test.expectedCode, resp.StatusCode, test.description)
+		// Read the response body
+		// body, _ := io.ReadAll(resp.Body)
+		// fmt.Println(string(body))
+	}
+}
+
+func TestCreatePrizeType(t *testing.T) {
+	access_token := createTestAccessToken()
+	// Setup Fiber app
+	app := fiber.New()
+	// Define the route
+	app.Post("/prize_type", CreatePrizeType)
+	uniqueName := fmt.Sprintf("CASH-%d", time.Now().Unix())
+	fmt.Println("uniqueName", uniqueName)
+	// Test cases
+	tests := []struct {
+		description  string
+		payload      map[string]any
+		expectedCode int
+		expectedData map[string]interface{} // expected data for detailed field checking
+	}{
+		{
+			description: "Success",
+			payload: map[string]any{
+				"name":         uniqueName,
+				"category_id":  1,
+				"value":        100,
+				"elligibility": 1,
+			},
+			expectedCode: 200,
+			expectedData: map[string]interface{}{
+				"status":  200,
+				"message": "success",
+			},
+		},
+		{
+			description: "Duplicate",
+			payload: map[string]any{
+				"name":         uniqueName,
+				"category_id":  1,
+				"value":        100,
+				"elligibility": 1,
+			},
+			expectedCode: 409,
+			expectedData: map[string]interface{}{
+				"status":  409,
+				"message": "duplicate",
+			},
+		},
+		{
+			description: "Invalid name",
+			payload: map[string]any{
+				"name":         "CAR%42",
+				"category_id":  1,
+				"value":        100,
+				"elligibility": 1,
+			},
+			expectedCode: 406,
+		},
+		{
+			description: "Invalid category id",
+			payload: map[string]any{
+				"name":         "CAR 42",
+				"category_id":  -1,
+				"value":        100,
+				"elligibility": 1,
+			},
+			expectedCode: 406,
+		},
+		{
+			description:  "required field",
+			expectedCode: 400,
+		},
+	}
+
+	// Initialize the assert object
+	a := assert.New(t)
+
+	// Run the tests
+	for _, test := range tests {
+		reqBody, _ := json.Marshal(test.payload)
+		req := httptest.NewRequest("POST", "/prize_type", bytes.NewReader(reqBody))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", access_token)
+
+		resp, _ := app.Test(req, -1)
+		// Check the status code
+		a.Equal(test.expectedCode, resp.StatusCode, test.description)
+		// Read the response body
+		// body, _ := io.ReadAll(resp.Body)
+		// fmt.Println(string(body))
+	}
 }
