@@ -18,6 +18,7 @@ import (
 	"unsafe"
 	"web-service/model"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/go-redis/redis/v8"
 	"github.com/gofiber/fiber/v2"
 	"github.com/nicksnyder/go-i18n/v2/i18n"
@@ -206,7 +207,12 @@ func JsonErrorResponse(c *fiber.Ctx, responseStatus int, message string, logger 
 	traceId := ""
 	//save logs if it is available
 	for _, log := range logger {
-		logId := LogMessage(string(log.LogLevel), log.Message, log.ServiceName, traceId)
+		logId := ""
+		if !IsTestMode {
+			logId = LogMessage(string(log.LogLevel), log.Message, log.ServiceName, traceId)
+		} else {
+			fmt.Println(log.Message)
+		}
 		//update traceId once it is empty only, then other logs will use that traceId
 		if traceId == "" {
 			traceId = logId
@@ -335,4 +341,61 @@ func SecurePath(c *fiber.Ctx, redis *redis.Client) (*model.UserProfile, error) {
 	redis.Expire(ctx, authHeader, time.Duration(SessionExpirationTime*time.Minute))
 	logger.AccessToken = authHeader
 	return &logger, nil
+}
+
+// Custom function to validate with regex provided in struct tag
+func RegexValidation(fl validator.FieldLevel) bool {
+	param := fl.Param() // Get the regex pattern from the struct tag
+	regex := regexp.MustCompile(param)
+	return regex.MatchString(fl.Field().String())
+}
+func IsErrDuplicate(err error) (bool, string) {
+	if strings.Contains(err.Error(), "duplicate key value violates unique constraint") {
+		keyName := ""
+		key := strings.Split(err.Error(), "\"")[1]
+		switch key {
+		case "prize_category_name_key":
+			keyName = "Category name"
+		case "unique_code_prize":
+			keyName = "code and prize type"
+		case "unique_customer_prize":
+			keyName = "customer and prize type"
+		case "users_phone_key":
+			keyName = "phone"
+		case "users_email_key":
+			keyName = "email"
+		default:
+			keyName = key
+		}
+		return true, keyName
+	}
+	return false, ""
+}
+
+func IsForeignKeyErr(err error) (bool, string) {
+	if strings.Contains(err.Error(), "violates foreign key constraint") {
+		keyName := ""
+		key := strings.Split(err.Error(), "\"")[3]
+		switch key {
+		case "prize_type_prize_category_id_fkey":
+			keyName = "Category id"
+		default:
+			keyName = key
+		}
+		return true, keyName
+	}
+	return false, ""
+}
+func GenerateRandomNumber(length int) int {
+	mathRand.New(mathRand.NewSource(time.Now().UnixNano()))
+	return mathRand.Intn(length) + 1
+}
+func GenerateRandomCapitalLetter(length int) string {
+	mathRand.Seed(time.Now().UnixNano()) // Seed the random number generator with the current time
+	letters := "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	result := make([]byte, length)
+	for i := 0; i < length; i++ {
+		result[i] = letters[mathRand.Intn(len(letters))]
+	}
+	return string(result)
 }

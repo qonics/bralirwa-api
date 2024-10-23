@@ -179,7 +179,306 @@
         }
       ],
       "input_headers": [
-        "Authorization"
+        "Authorization","Content-Type","User-Agent","Host"
+      ]
+    },
+    {
+      "endpoint": "/api/v1/entries",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/api/v1/entries",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "GET",
+          "host": [
+            "http://web-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ],
+      "input_headers": [
+        "Authorization","Content-Type","User-Agent","Host"
+      ]
+    },
+    {
+      "endpoint": "/api/v1/prize_categories",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/api/v1/prize_categories",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "GET",
+          "host": [
+            "http://web-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ],
+      "input_headers": [
+        "Authorization","Content-Type","User-Agent","Host"
+      ]
+    },
+    {
+      "endpoint": "/api/v1/prize_type",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/api/v1/prize_type",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "GET",
+          "host": [
+            "http://web-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ],
+      "input_headers": [
+          "Authorization","Content-Type","User-Agent","Host"
+      ]
+    },
+    {
+      "endpoint": "/api/v1/prize_type/",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/api/v1/prize_type",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "GET",
+          "host": [
+            "http://web-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ],
+      "input_headers": [
+        "Authorization","Content-Type","User-Agent","Host"
+      ]
+    },
+    {
+      "endpoint": "/api/v1/prize_type/{prize_category}",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/api/v1/prize_type/{prize_category}",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "GET",
+          "host": [
+            "http://web-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ],
+      "input_headers": [
+        "Authorization","Content-Type","User-Agent","Host"
+      ]
+    },
+    {
+      "endpoint": "/api/v1/prize_distributions",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/api/v1/prize_distributions",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "GET",
+          "host": [
+            "http://web-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ],
+      "input_headers": [
+          "Authorization","Content-Type","User-Agent","Host"
+      ]
+    },
+    {
+      "endpoint": "/api/v1/customer/{customer_id}",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/api/v1/customer",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "GET",
+          "host": [
+            "http://web-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ],
+      "input_headers": [
+        "Authorization","Content-Type","User-Agent","Host"
+      ]
+    },
+    {
+      "endpoint": "/api/v1/customer_entry_history/{customer_id}",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/api/v1/customer_entry_history",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "GET",
+          "host": [
+            "http://web-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ],
+      "input_headers": [
+          "Authorization","Content-Type","User-Agent","Host"
+      ]
+    },
+    {
+      "endpoint": "/api/v1/avatar/svg/av/{avatar_id}",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/api/v1/avatar/svg/av/{avatar_id}",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "GET",
+          "host": [
+            "http://web-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ],
+      "input_headers": [
+          "Authorization","Content-Type","User-Agent","Host"
+      ]
+    },
+    {
+      "endpoint": "/api/v1/draws",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/api/v1/draws",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "GET",
+          "host": [
+            "http://web-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ],
+      "input_headers": [
+          "Authorization","Content-Type","User-Agent","Host"
+      ]
+    },
+    {
+      "endpoint": "/api/v1/users",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/api/v1/users",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "GET",
+          "host": [
+            "http://web-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ],
+      "input_headers": [
+          "Authorization","Content-Type","User-Agent","Host"
+      ]
+    },
+    {
+      "endpoint": "/api/v1/upload_codes",
+      "method": "POST",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/api/v1/upload_codes",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "POST",
+          "host": [
+            "http://web-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ],
+      "input_headers": [
+        "Authorization","Content-Type","User-Agent","Host"
+      ]
+    },
+    {
+      "endpoint": "/api/v1/prize_category",
+      "method": "POST",
+      "output_encoding": "no-op",
+      "input_headers": [
+        "Authorization","Content-Type","User-Agent","Host"
+      ],
+      "backend": [
+        {
+          "url_pattern": "/api/v1/prize_category",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "POST",
+          "host": [
+            "http://web-service:9000"
+          ]
+        }
+      ]
+    },
+    {
+      "endpoint": "/api/v1/prize_type",
+      "method": "POST",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/api/v1/prize_type",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "POST",
+          "host": [
+            "http://web-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ],
+      "input_headers": [
+          "Authorization","Content-Type","User-Agent","Host"
+      ]
+    },
+    {
+      "endpoint": "/api/v1/user",
+      "method": "POST",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/api/v1/user",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "POST",
+          "host": [
+            "http://web-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ],
+      "input_headers": [
+          "Authorization","Content-Type","User-Agent","Host"
       ]
     }
   ]

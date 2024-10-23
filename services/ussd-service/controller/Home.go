@@ -237,6 +237,10 @@ func processUSSD(input *string, phone string, sessionId string, networkOperator 
 			}
 		}
 		if action := resItem.Action; action != "" {
+			if action == "end_session" {
+				msg := utils.Localize(localizer, "thank_you", nil)
+				return msg, nil, true
+			}
 			resultMessage, err = callUserFunc(action, sessionId, lang, input, phone, customer, lang, USSDdata.LastInput, networkOperator)
 			if err != nil {
 				if len(resultMessage) == 0 {
@@ -324,6 +328,7 @@ func callUserFunc(functionName string, args ...interface{}) (string, error) {
 		"completeRegistration":    completeRegistration,
 		"action_completed":        action_completed,
 		"entrySaveCode":           entrySaveCode,
+		"end_session":             end_session,
 	}[functionName])
 	if !funcValue.IsValid() {
 		return "", fmt.Errorf("invalid function call: %s, arg: %v", functionName, args)
@@ -669,4 +674,7 @@ func entrySaveCode(args ...interface{}) string {
 		return "err:system_error"
 	}
 	return ""
+}
+func end_session(args ...interface{}) string {
+	return "success_entry"
 }
