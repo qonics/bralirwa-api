@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"logger-service/helper"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 	"web-service/config"
@@ -17,6 +19,7 @@ import (
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
 	"github.com/jackc/pgx/v5"
+	"github.com/spf13/viper"
 )
 
 var Validate = validator.New()
@@ -45,7 +48,35 @@ func Index(c *fiber.Ctx) error {
 func ServiceStatusCheck(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"status": 200, "message": "This API service is running!"})
 }
-
+func GetSVGAvatar(c *fiber.Ctx) error {
+	typee := c.Params("type", "av")
+	avatarNumber, err := strconv.Atoi(c.Params("avatar_number", "1"))
+	if err != nil || avatarNumber > 89 {
+		c.SendStatus(fiber.StatusForbidden)
+		return c.SendString("Please provide a valid avatar info")
+	}
+	location := "corporate"
+	if typee == "av" {
+		location = "avatars"
+	}
+	filePath := fmt.Sprintf("/app/assets/svg/%s/avatar_%d.svg", location, avatarNumber)
+	file, err := os.ReadFile(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			c.SendStatus(fiber.StatusNotFound)
+			//provide default avatar
+			file, _ = os.ReadFile(fmt.Sprintf("/app/assets/svg/%s/avatar_1.svg", location))
+		} else {
+			c.SendStatus(fiber.StatusForbidden)
+			fmt.Println("Unable to get avatar, err: " + err.Error())
+			return c.SendString("We have an issue on our end!")
+		}
+	}
+	// Set the Cache-Control header to cache the image for one year
+	c.Set("Cache-Control", "public, max-age=31536000")
+	c.Set("Content-Type", "image/svg+xml")
+	return c.SendString(string(file))
+}
 func LoginWithEmail(c *fiber.Ctx) error {
 	type UserData struct {
 		Email    string `json:"email" binding:"required" validate:"required,email"`
@@ -475,4 +506,96 @@ func CreateNewDraw(c *fiber.Ctx) error {
 		})
 	}
 	return c.JSON(fiber.Map{"status": responseStatus, "message": "Prize type added successfully"})
+}
+func AddUser(c *fiber.Ctx) error {
+	userPayload, err := utils.SecurePath(c, config.Redis)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
+	}
+	type FormData struct {
+		Fname          string `json:"fname" binding:"required" validate:"required,regex=^[a-zA-Z0-9 ]*$"`
+		Lname          string `json:"lname" binding:"required" validate:"required,regex=^[a-zA-Z0-9 ]*$"`
+		Phone          string `json:"phone" binding:"required" validate:"required,regex=^07[2389]\\d{7}$"`
+		Email          string `json:"email" binding:"required" validate:"required,email"`
+		Department     int    `json:"department" binding:"required" validate:"required,number"`
+		CanAddCode     bool   `json:"can_add_codes" binding:"required" validate:"boolean"`
+		CanTriggerDraw bool   `json:"can_trigger_draw" binding:"required" validate:"boolean"`
+		CanViewLogs    bool   `json:"can_view_logs" binding:"required" validate:"boolean"`
+		CanAddUser     bool   `json:"can_add_user" binding:"required" validate:"boolean"`
+	}
+	responseStatus := 200
+	formData := new(FormData)
+	if err := c.BodyParser(formData); err != nil || formData.Fname == "" {
+		responseStatus = 400
+		c.SendStatus(responseStatus)
+		return c.JSON(fiber.Map{"status": responseStatus, "message": "Please provide all required data - " + formData.Fname, "details": err})
+	}
+	if err := Validate.Struct(formData); err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Provide data are not valid")
+	}
+	invalidKeys := utils.ValidateStruct(formData, []string{"#", "@"}, []string{})
+	errorMessage := utils.ValidateStructText(invalidKeys)
+	if errorMessage != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, *errorMessage)
+	}
+	n := utils.GenerateRandomNumber(89)
+	avatarUrl := fmt.Sprintf("%s/api/v1/avatar/svg/av/%d", viper.GetString("BACKEND_URL"), n)
+	//insert user data, and will have to set password for the first time with a verification using phone
+	_, err = config.DB.Exec(ctx,
+		`insert into users (fname,lname, email,phone, department_id, password, can_add_codes, can_trigger_draw, can_view_logs, can_add_user, status, operator, avatar_url) values ($1, $2, $3, $4, $5, '-', $6, $7, $8, $9, 'OKAY', $10, $11)`,
+		formData.Fname, formData.Lname, formData.Email, formData.Phone, formData.Department, formData.CanAddCode, formData.CanTriggerDraw, formData.CanViewLogs, formData.CanAddUser, userPayload.Id, avatarUrl)
+
+	if err != nil {
+		if ok, key := utils.IsErrDuplicate(err); ok {
+			return utils.JsonErrorResponse(c, fiber.StatusConflict, fmt.Sprintf("Unable to save data, %s already exists", key))
+		} else if ok, key := utils.IsForeignKeyErr(err); ok {
+			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, fmt.Sprintf("Unable to save data, %s is invalid", key))
+		}
+		responseStatus = fiber.StatusConflict
+		c.SendStatus(responseStatus)
+		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to save data, system error. please try again later", utils.Logger{
+			LogLevel:    utils.CRITICAL,
+			Message:     fmt.Sprintf("CreatePrizeType: Unable to save data, Name:%s, err:%v", formData.Fname, err),
+			ServiceName: config.ServiceName,
+		})
+	}
+	return c.JSON(fiber.Map{"status": responseStatus, "message": "User added successfully"})
+}
+
+func GetUsers(c *fiber.Ctx) error {
+	_, err := utils.SecurePath(c, config.Redis)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
+	}
+	users := []model.UserProfile{}
+	//fetch users
+	rows, err := config.DB.Query(ctx,
+		`select u.id,u.fname,u.lname,u.email,u.phone,u.department_id,d.title as department_title, u.email_verified,u.phone_verified,u.avatar_url,u.status,
+			u.can_add_codes,u.can_trigger_draw,u.can_view_logs,u.can_add_user from users u inner join departments d on u.department_id = d.id`)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get users data failed", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "GetUsers: Unable to get users data, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+		return utils.JsonErrorResponse(c, fiber.StatusForbidden, "users data is not valid")
+	}
+	for rows.Next() {
+		user := model.UserProfile{}
+		//scan user data
+		err = rows.Scan(&user.Id, &user.Fname, &user.Lname, &user.Email, &user.Phone, &user.Department.Id, &user.Department.Title, &user.EmailVerified, &user.PhoneVerified,
+			&user.AvatarUrl, &user.Status, &user.CanAddCodes, &user.CanTriggerDraw, &user.CanViewLogs, &user.CanAddUser)
+
+		if err != nil {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get users data failed", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "GetUsers: Unable to get users data, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+		users = append(users, user)
+	}
+	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "data": users})
 }

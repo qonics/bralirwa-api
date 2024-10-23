@@ -210,6 +210,8 @@ func JsonErrorResponse(c *fiber.Ctx, responseStatus int, message string, logger 
 		logId := ""
 		if !IsTestMode {
 			logId = LogMessage(string(log.LogLevel), log.Message, log.ServiceName, traceId)
+		} else {
+			fmt.Println(log.Message)
 		}
 		//update traceId once it is empty only, then other logs will use that traceId
 		if traceId == "" {
@@ -358,6 +360,10 @@ func IsErrDuplicate(err error) (bool, string) {
 			keyName = "code and prize type"
 		case "unique_customer_prize":
 			keyName = "customer and prize type"
+		case "users_phone_key":
+			keyName = "phone"
+		case "users_email_key":
+			keyName = "email"
 		default:
 			keyName = key
 		}
@@ -379,4 +385,17 @@ func IsForeignKeyErr(err error) (bool, string) {
 		return true, keyName
 	}
 	return false, ""
+}
+func GenerateRandomNumber(length int) int {
+	mathRand.New(mathRand.NewSource(time.Now().UnixNano()))
+	return mathRand.Intn(length) + 1
+}
+func GenerateRandomCapitalLetter(length int) string {
+	mathRand.Seed(time.Now().UnixNano()) // Seed the random number generator with the current time
+	letters := "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	result := make([]byte, length)
+	for i := 0; i < length; i++ {
+		result[i] = letters[mathRand.Intn(len(letters))]
+	}
+	return string(result)
 }
