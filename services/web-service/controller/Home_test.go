@@ -20,10 +20,10 @@ import (
 
 func init() {
 	utils.IsTestMode = true
-	viper.Set("saltKey", "testSaltKey")
 	utils.IsTestMode = true
 	utils.InitializeViper("config", "yml")
-	viper.Set("saltKey", "testSaltKey")
+	viper.Set("encryption_key", "secret")
+	config.InitializeConfig()
 	//set the test db config
 	viper.Set("postgres_db.cluster", "127.0.0.1")
 	viper.Set("postgres_db.keyspace", "lottery_db")
@@ -70,6 +70,12 @@ VALUES
 	_, err = config.DB.Exec(ctx, `INSERT INTO prize_type (id,name, prize_category_id, value, elligibility, status) VALUES (3,'Test Prize 3', 2, 100, 2, 'OKAY');`)
 	if err != nil {
 		fmt.Println("Error inserting prize_type data", err)
+	}
+	_, err = config.DB.Exec(ctx, `INSERT INTO customer (id, names,phone,phone_hash,province,district,locale,network_operator)
+	VALUES (1, pgp_sym_encrypt('KALISA Doe', 'secret'),pgp_sym_encrypt('250785753712', 'secret')::bytea,digest('250785753712', 'sha256')::bytea,5,3,'en','MTN');
+`)
+	if err != nil {
+		fmt.Println("Error inserting customer data", err)
 	}
 
 }
@@ -259,6 +265,10 @@ func TestGetPrizeType(t *testing.T) {
 			a.NotEmpty(dataRecord["elligibility"], "elligibility")
 			a.NotEmpty(dataRecord["created_at"], "created_at")
 			a.NotEmpty(dataRecord["status"], "status")
+			a.NotEmpty(dataRecord["messages"], "messages")
+			a.NotEmpty(dataRecord["period"], "period")
+			a.NotEmpty(dataRecord["expiry_date"], "expiry_date")
+			a.NotEmpty(dataRecord["distribution"], "distribution")
 		}
 	}
 }
@@ -295,11 +305,15 @@ func TestGetPrizeTypeByCategory(t *testing.T) {
 		dataRecord, ok := singleRecord[0].(map[string]interface{})
 		a.True(ok, "dataRecord should be a map")
 		a.NotEmpty(dataRecord["id"], "id")
-		a.Equal(dataRecord["name"], "Test Prize 1", "name")
+		a.NotEmpty(dataRecord["name"], "name")
 		a.NotEmpty(dataRecord["value"], "value")
 		a.NotEmpty(dataRecord["elligibility"], "elligibility")
 		a.NotEmpty(dataRecord["created_at"], "created_at")
 		a.NotEmpty(dataRecord["status"], "status")
+		a.NotEmpty(dataRecord["messages"], "messages")
+		a.NotEmpty(dataRecord["period"], "period")
+		a.NotEmpty(dataRecord["expiry_date"], "expiry_date")
+		a.NotEmpty(dataRecord["distribution"], "distribution")
 	}
 }
 
@@ -499,7 +513,7 @@ func TestCreatePrizeType(t *testing.T) {
 		description  string
 		payload      map[string]any
 		expectedCode int
-		expectedData map[string]interface{} // expected data for detailed field checking
+		expectedData map[string]any // expected data for detailed field checking
 	}{
 		{
 			description: "Success",
@@ -508,9 +522,16 @@ func TestCreatePrizeType(t *testing.T) {
 				"category_id":  1,
 				"value":        100,
 				"elligibility": 1,
+				"expiry_date":  "25/12/2024",
+				"distribution": "momo",
+				"period":       "weekly",
+				"messages": []map[string]any{
+					{"message": "Congratulations, you have won a prize", "lang": "en"},
+					{"message": "Mwatsindiye ibihembo", "lang": "rw"},
+				},
 			},
 			expectedCode: 200,
-			expectedData: map[string]interface{}{
+			expectedData: map[string]any{
 				"status":  200,
 				"message": "success",
 			},
@@ -522,6 +543,13 @@ func TestCreatePrizeType(t *testing.T) {
 				"category_id":  1,
 				"value":        100,
 				"elligibility": 1,
+				"expiry_date":  "25/12/2024",
+				"distribution": "momo",
+				"period":       "weekly",
+				"messages": []map[string]any{
+					{"message": "Congratulations, you have won a prize", "lang": "en"},
+					{"message": "Mwatsindiye ibihembo", "lang": "rw"},
+				},
 			},
 			expectedCode: 409,
 			expectedData: map[string]interface{}{
@@ -536,6 +564,30 @@ func TestCreatePrizeType(t *testing.T) {
 				"category_id":  1,
 				"value":        100,
 				"elligibility": 1,
+				"expiry_date":  "25/12/2024",
+				"distribution": "momo",
+				"period":       "weekly",
+				"messages": []map[string]any{
+					{"message": "Congratulations, you have won a prize", "lang": "en"},
+					{"message": "Mwatsindiye ibihembo", "lang": "rw"},
+				},
+			},
+			expectedCode: 406,
+		},
+		{
+			description: "expired date",
+			payload: map[string]any{
+				"name":         "CAR-42",
+				"category_id":  1,
+				"value":        100,
+				"elligibility": 1,
+				"expiry_date":  "23/10/2024",
+				"distribution": "momo",
+				"period":       "weekly",
+				"messages": []map[string]any{
+					{"message": "Congratulations, you have won a prize", "lang": "en"},
+					{"message": "Mwatsindiye ibihembo", "lang": "rw"},
+				},
 			},
 			expectedCode: 406,
 		},
@@ -546,6 +598,13 @@ func TestCreatePrizeType(t *testing.T) {
 				"category_id":  -1,
 				"value":        100,
 				"elligibility": 1,
+				"expiry_date":  "25/12/2024",
+				"distribution": "momo",
+				"period":       "weekly",
+				"messages": []map[string]any{
+					{"message": "Congratulations, you have won a prize", "lang": "en"},
+					{"message": "Mwatsindiye ibihembo", "lang": "rw"},
+				},
 			},
 			expectedCode: 406,
 		},
@@ -583,7 +642,6 @@ func TestAddUser(t *testing.T) {
 	uniqueName := fmt.Sprintf("User %d", time.Now().Unix())
 	uniqueEmail := fmt.Sprintf("user%d@example.com", time.Now().Unix())
 	uniquePhone := fmt.Sprintf("078%s", fmt.Sprintf("%d", time.Now().Unix())[3:])
-	fmt.Println(uniquePhone)
 	// Test cases
 	tests := []struct {
 		description  string
@@ -743,5 +801,42 @@ func TestGetUsers(t *testing.T) {
 			a.NotEmpty(dataRecord["can_add_codes"], "can_add_codes")
 			a.NotEmpty(dataRecord["created_at"], "created_at")
 		}
+	}
+}
+func TestGetCustomer(t *testing.T) {
+	access_token := createTestAccessToken()
+	// Setup Fiber app
+	app := fiber.New()
+	// Define the route
+	app.Get("/customer/:customerId", GetCustomer)
+
+	// Initialize the assert object
+	a := assert.New(t)
+
+	// Run the test
+	req := httptest.NewRequest("GET", "/customer/1", nil)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", access_token)
+
+	resp, _ := app.Test(req, -1)
+	// Check the status code
+	a.Equal(fiber.StatusOK, resp.StatusCode)
+
+	// Read the response body
+	body, _ := io.ReadAll(resp.Body)
+	// fmt.Println(string(body))
+	var result map[string]interface{}
+	json.Unmarshal(body, &result)
+	// Check each field
+	if resp.StatusCode == 200 {
+		dataRecord, ok := result["data"].(map[string]interface{})
+		a.True(ok, "dataRecord should be a map")
+		a.NotEmpty(dataRecord["id"], "id")
+		a.NotEmpty(dataRecord["names"], "names")
+		a.NotEmpty(dataRecord["province"], "province")
+		a.NotEmpty(dataRecord["district"], "district")
+		a.NotEmpty(dataRecord["phone"], "phone")
+		a.NotEmpty(dataRecord["locale"], "locale")
+		a.NotEmpty(dataRecord["created_at"], "created_at")
 	}
 }

@@ -210,10 +210,12 @@ func GetPrizeType(c *fiber.Ctx) error {
 	var rows pgx.Rows
 	if prizeCategory == "" {
 		rows, err = config.DB.Query(ctx,
-			`select p.id,p.name,p.status,p.value,p.elligibility,pc.name as category_name,pc.id as category_id,pc.status as category_status,pc.created_at,p.created_at from prize_type p join prize_category pc on p.prize_category_id = pc.id`)
+			`select p.id,p.name,p.status,p.value,p.elligibility,pc.name as category_name,pc.id as category_id,pc.status as category_status,pc.created_at,p.created_at,
+			p.period,p.distribution_type,p.expiry_date,STRING_AGG(pm.lang, ', ') as langs,STRING_AGG(pm.message, ', ') as messages from prize_type p join prize_category pc on p.prize_category_id = pc.id join prize_message pm on pm.prize_type_id=p.id group by p.id,pc.id`)
 	} else {
 		rows, err = config.DB.Query(ctx,
-			`select p.id,p.name,p.status,p.value,p.elligibility,pc.name as category_name,pc.id as category_id,pc.status as category_status,pc.created_at,p.created_at from prize_type p join prize_category pc on p.prize_category_id = pc.id where p.prize_category_id=$1`, prizeCategory)
+			`select p.id,p.name,p.status,p.value,p.elligibility,pc.name as category_name,pc.id as category_id,pc.status as category_status,pc.created_at,p.created_at,
+			p.period,p.distribution_type,p.expiry_date,STRING_AGG(pm.lang, ', ') as langs,STRING_AGG(pm.message, ', ') as messages from prize_type p join prize_category pc on p.prize_category_id = pc.id join prize_message pm on pm.prize_type_id=p.id where p.prize_category_id=$1 group by p.id,pc.id`, prizeCategory)
 	}
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
@@ -226,9 +228,15 @@ func GetPrizeType(c *fiber.Ctx) error {
 		return utils.JsonErrorResponse(c, fiber.StatusForbidden, "prize type data is not valid")
 	}
 	for rows.Next() {
+		var langs, messages string
 		prize := model.PrizeType{}
 		err = rows.Scan(&prize.Id, &prize.Name, &prize.Status, &prize.Value, &prize.Elligibility, &prize.PrizeCategory.Name,
-			&prize.PrizeCategory.Id, &prize.PrizeCategory.Status, &prize.PrizeCategory.CreatedAt, &prize.CreatedAt)
+			&prize.PrizeCategory.Id, &prize.PrizeCategory.Status, &prize.PrizeCategory.CreatedAt, &prize.CreatedAt, &prize.Period, &prize.Distribution, &prize.ExpiryDate, &langs, &messages)
+		//extract messages and langs and populate to []prize.Message
+		prize.PrizeMessage = []model.PrizeMessage{}
+		for i, lang := range strings.Split(langs, ", ") {
+			prize.PrizeMessage = append(prize.PrizeMessage, model.PrizeMessage{Lang: lang, Message: strings.Split(messages, ", ")[i]})
+		}
 		if err != nil {
 			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get prize type data failed", utils.Logger{
 				LogLevel:    utils.CRITICAL,
@@ -374,30 +382,62 @@ func CreatePrizeType(c *fiber.Ctx) error {
 	if err != nil {
 		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
 	}
+
 	type FormData struct {
-		Name         string `json:"name" binding:"required" validate:"required,regex=^[a-zA-Z0-9\\-_ #@]*$"`
-		CategoryId   int    `json:"category_id" binding:"required" validate:"required,number"`
-		Value        int    `json:"value" binding:"required" validate:"required,number"`
-		Elligibility int    `json:"elligibility" binding:"required" validate:"required,number"`
+		Name         string               `json:"name" binding:"required" validate:"required,regex=^[a-zA-Z0-9\\-_ #@]*$"`
+		CategoryId   int                  `json:"category_id" binding:"required" validate:"required,number"`
+		Value        int                  `json:"value" binding:"required" validate:"required,number"`
+		Elligibility int                  `json:"elligibility" binding:"required" validate:"required,number"`
+		ExpiryDate   string               `json:"expiry_date" binding:"required" validate:"required"`
+		Period       string               `json:"period" binding:"required" validate:"required,oneof=monthly weekly daily"`
+		Distribution string               `json:"distribution" binding:"required" validate:"required,oneof=momo cheque other"`
+		Messages     []model.PrizeMessage `json:"messages" binding:"required" validate:"required"`
 	}
 	responseStatus := 200
 	formData := new(FormData)
 	if err := c.BodyParser(formData); err != nil || formData.Name == "" {
 		responseStatus = 400
 		c.SendStatus(responseStatus)
-		return c.JSON(fiber.Map{"status": responseStatus, "message": "Please provide all required data - " + formData.Name, "details": err})
+		return c.JSON(fiber.Map{"status": responseStatus, "message": "Please provide all required data", "details": err})
 	}
 	if err := Validate.Struct(formData); err != nil {
-		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Provide data are not valid")
+		c.SendStatus(fiber.StatusNotAcceptable)
+		return c.JSON(fiber.Map{"status": fiber.StatusNotAcceptable, "message": "Provide data are not valid", "details": err})
 	}
-	invalidKeys := utils.ValidateStruct(formData, []string{"#", "@"}, []string{})
+	invalidKeys := utils.ValidateStruct(formData, []string{"#", "@"}, []string{"ExpiryDate"})
 	errorMessage := utils.ValidateStructText(invalidKeys)
 	if errorMessage != nil {
 		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, *errorMessage)
 	}
-	_, err = config.DB.Exec(ctx,
-		`insert into prize_type (name,prize_category_id,elligibility,value,status,operator_id) values ($1,$2,$3,$4,'OKAY',$5)`,
-		formData.Name, formData.CategoryId, formData.Elligibility, formData.Value, userPayload.Id)
+	//check if expiry_date is already expired
+	expiryDate, err := time.Parse("02/01/2006", formData.ExpiryDate)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Provide data are not valid")
+	}
+	if expiryDate.Before(time.Now()) {
+		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Expiry date is already expired")
+	}
+	tx, err := config.DB.Begin(ctx)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to save data, system error. please try again later", utils.Logger{
+			LogLevel:    utils.CRITICAL,
+			Message:     fmt.Sprintf("CreatePrizeType: Unable to begin transaction, Name:%s, err:%v", formData.Name, err),
+			ServiceName: config.ServiceName,
+		})
+	}
+	defer func() {
+		if err != nil {
+			if rbErr := tx.Rollback(context.Background()); rbErr != nil {
+				utils.LogMessage("critical", fmt.Sprintf("CreatePrizeType: Unable to rollback transaction, Name:%s, err:%v", formData.Name, rbErr), config.ServiceName)
+			}
+		}
+	}()
+	var prizeTypeId int
+	err = tx.QueryRow(ctx,
+		`insert into prize_type (name,prize_category_id,elligibility,value,status,operator_id,expiry_date,distribution_type,period)
+		values ($1,$2,$3,$4,'OKAY',$5, $6, $7, $8)  returning id`,
+		formData.Name, formData.CategoryId, formData.Elligibility, formData.Value, userPayload.Id, expiryDate, formData.Distribution, formData.Period).
+		Scan(&prizeTypeId)
 	if err != nil {
 		if ok, key := utils.IsErrDuplicate(err); ok {
 			return utils.JsonErrorResponse(c, fiber.StatusConflict, fmt.Sprintf("Unable to save data, %s already exists", key))
@@ -409,6 +449,25 @@ func CreatePrizeType(c *fiber.Ctx) error {
 		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to save data, system error. please try again later", utils.Logger{
 			LogLevel:    utils.CRITICAL,
 			Message:     fmt.Sprintf("CreatePrizeType: Unable to save data, Name:%s, err:%v", formData.Name, err),
+			ServiceName: config.ServiceName,
+		})
+	}
+	//save message
+	for _, message := range formData.Messages {
+		_, err = tx.Exec(ctx,
+			`insert into prize_message (lang, prize_type_id, message, operator_id) values ($1, $2, $3, $4)`, message.Lang, prizeTypeId, message.Message, userPayload.Id)
+		if err != nil {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to save data, system error. please try again later", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     fmt.Sprintf("CreatePrizeType: Unable to save message, Name:%s, err:%v", formData.Name, err),
+				ServiceName: config.ServiceName,
+			})
+		}
+	}
+	if err = tx.Commit(context.Background()); err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to save data, system error. please try again later", utils.Logger{
+			LogLevel:    utils.CRITICAL,
+			Message:     fmt.Sprintf("CreatePrizeType: Unable to commit transaction, Name:%s, err:%v", formData.Name, err),
 			ServiceName: config.ServiceName,
 		})
 	}
@@ -598,4 +657,32 @@ func GetUsers(c *fiber.Ctx) error {
 		users = append(users, user)
 	}
 	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "data": users})
+}
+
+func GetCustomer(c *fiber.Ctx) error {
+	_, err := utils.SecurePath(c, config.Redis)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
+	}
+	customerId := c.Params("customerId")
+	customer := model.Customer{}
+	fmt.Println("Secret key", config.EncryptionKey)
+	err = config.DB.QueryRow(ctx,
+		`select p.id as province_id,p.name as province_name,d.id as district_id,d.name as district_name,
+		c.created_at,c.network_operator,c.locale,pgp_sym_decrypt(c.names::bytea,$1) as names,pgp_sym_decrypt(c.phone::bytea,$1) as phone,c.id from customer c
+		inner join province p on c.province = p.id
+		inner join district d on c.district = d.id where c.id=$2`, config.EncryptionKey, customerId).
+		Scan(&customer.Province.Id, &customer.Province.Name, &customer.District.Id, &customer.District.Name, &customer.CreatedAt, &customer.NetworkOperator,
+			&customer.Locale, &customer.Names, &customer.Phone, &customer.Id)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get customer data failed", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "GetCustomer: Unable to get customer data, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+		return utils.JsonErrorResponse(c, fiber.StatusNotFound, "customer id provided is not valid")
+	}
+	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "data": customer})
 }
