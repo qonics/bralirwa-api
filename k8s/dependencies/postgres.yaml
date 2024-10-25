@@ -5,8 +5,8 @@ metadata:
 spec:
   teamId: "qonics"
   volume:
-    size: 1Gi
-  numberOfInstances: 1
+    size: 50Gi
+  numberOfInstances: 2
   users:
     postgres:  # database owner
     - superuser
@@ -14,6 +14,7 @@ spec:
     foo_user: []  # role for application foo
   databases:
     lottery_db: postgres  # dbname: owner
+    leazi_db: postgres  # dbname: owner
   preparedDatabases:
     bar: {}
   postgresql:

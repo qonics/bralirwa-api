@@ -140,7 +140,6 @@ func processUSSD(input *string, phone string, sessionId string, networkOperator 
 		}
 	}
 	if USSDdata == nil {
-		//TODO: check if phone is in MTN momo or AIRTEL money
 		isNewRequest = true
 		//fetch initial step
 		USSDdata = &model.USSDData{
@@ -153,6 +152,18 @@ func processUSSD(input *string, phone string, sessionId string, networkOperator 
 			StepId:       initialStep,
 		}
 		setUssdData(*USSDdata)
+	}
+	if isNewRequest && USSDdata.StepId == "welcome" {
+		//check if phone number is valid
+		names, err := utils.ValidateMTNPhone(phone)
+		if err != nil {
+			//load localizer
+			localizer = loadLocalizer(lang)
+			msg := utils.Localize(localizer, err.Error(), nil)
+			return msg, nil, true
+		}
+		extraData := make(map[string]interface{})
+		appendExtraData(sessionId, extraData, "momo_names", names)
 	}
 	if !isNewRequest && USSDdata.StepId == "welcome" {
 		if *input == "1" {
@@ -607,11 +618,11 @@ func completeRegistration(args ...interface{}) string {
 	extraData := extra.(map[string]interface{})
 	provinceId := extraData["province"]
 	name := extraData["name"]
+	momo_names := extraData["momo_names"]
 	var customerId int
-	fmt.Println("completeRegistration: ", name, config.EncryptionKey, args[3].(string), provinceId, district["Id"], extraData["preferred_lang"], args[7].(string))
-	err := config.DB.QueryRow(ctx, `insert into customer (names,phone,phone_hash,province,district,locale, network_operator) values
-	(pgp_sym_encrypt($1,$2),pgp_sym_encrypt($3,$2)::bytea,digest($3,'sha256')::bytea,$4,$5,$6,$7) returning id`,
-		name, config.EncryptionKey, args[3].(string), provinceId, district["Id"], extraData["preferred_lang"], args[7].(string)).Scan(&customerId)
+	err := config.DB.QueryRow(ctx, `insert into customer (names,momo_names,phone,phone_hash,province,district,locale, network_operator) values
+	(pgp_sym_encrypt($1,$2),pgp_sym_encrypt($8,$2),pgp_sym_encrypt($3,$2)::bytea,digest($3,'sha256')::bytea,$4,$5,$6,$7) returning id`,
+		name, config.EncryptionKey, args[3].(string), provinceId, district["Id"], extraData["preferred_lang"], args[7].(string), momo_names).Scan(&customerId)
 	if err != nil {
 		utils.LogMessage("error", "completeRegistration: insert customer failed: err:"+err.Error(), "ussd-service")
 		return "err:system_error"
@@ -635,6 +646,8 @@ func completeRegistration(args ...interface{}) string {
 		return "err:system_error"
 	}
 	//TODO: instant prize
+	sms_message := utils.Localize(localizer, "register_sms", nil)
+	go utils.SendSMS(args[3].(string), sms_message, viper.GetString("SENDER_ID"), config.ServiceName, "registration", customerId)
 	return "success_entry"
 }
 func removeCustomer(customerId int) {

@@ -283,6 +283,7 @@ func GetEntries(c *fiber.Ctx) error {
 		entry.Customer.Names = "**********"
 		entry.Code.Code = "**********"
 		if prizeTypeName != nil {
+			entry.Code.PrizeType = &model.PrizeType{}
 			entry.Code.PrizeType.Name = *prizeTypeName
 			entry.Code.PrizeType.Id = *prizeTypeId
 			entry.Code.PrizeType.Value = *prizeTypeValue
@@ -685,4 +686,57 @@ func GetCustomer(c *fiber.Ctx) error {
 		return utils.JsonErrorResponse(c, fiber.StatusNotFound, "customer id provided is not valid")
 	}
 	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "data": customer})
+}
+
+func GetEntryData(c *fiber.Ctx) error {
+	_, err := utils.SecurePath(c, config.Redis)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
+	}
+	entryId := c.Params("entryId")
+	entry := model.Entries{}
+	fmt.Println("Secret key", config.EncryptionKey)
+	var prizeTypeName *string
+	var prizeTypeId, prizeTypeValue *int
+	var PrizeDate *time.Time
+	var prizeId *int
+	err = config.DB.QueryRow(ctx,
+		`select e.id,e.code_id,e.customer_id,e.created_at,p.id as province_id,p.name as province_name,d.id as district_id,d.name as district_name,
+		c.created_at,pt.name as prize_type_name,pt.id as prize_type_id,pt.value as prize_type_value,cd.created_at,c.network_operator,c.locale,
+		pgp_sym_decrypt(c.names::bytea,$1) as names,pgp_sym_decrypt(c.momo_names::bytea,$1) as momo_names,pgp_sym_decrypt(c.phone::bytea,$1) as phone,
+		pgp_sym_decrypt(cd.code::bytea,$1) as raw_code,pr.created_at,pr.id as prize_id from entries e
+		inner join customer c on e.customer_id = c.id
+		inner join codes cd on e.code_id = cd.id
+		inner join province p on c.province = p.id
+		inner join district d on c.district = d.id
+		LEFT join prize pr on pr.entry_id = e.id
+		LEFT JOIN prize_type pt on cd.prize_type_id = pt.id where c.id=$2`, config.EncryptionKey, entryId).
+		Scan(&entry.Id, &entry.Code.Id, &entry.Customer.Id, &entry.CreatedAt, &entry.Customer.Province.Id, &entry.Customer.Province.Name,
+			&entry.Customer.District.Id, &entry.Customer.District.Name, &entry.Customer.CreatedAt, &prizeTypeName, &prizeTypeId, &prizeTypeValue,
+			&entry.Code.CreatedAt, &entry.Customer.NetworkOperator, &entry.Customer.Locale, &entry.Customer.Names, &entry.Customer.MOMONames,
+			&entry.Customer.Phone, &entry.Code.Code, &PrizeDate, &prizeId)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get customer entry data failed", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "GetEntryData: Unable to get customer entry data, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+		return utils.JsonErrorResponse(c, fiber.StatusNotFound, "entry id provided is not valid")
+	}
+	if prizeTypeName != nil {
+		entry.Code.PrizeType = new(model.PrizeType)
+		entry.Code.PrizeType.Name = *prizeTypeName
+		entry.Code.PrizeType.Id = *prizeTypeId
+		entry.Code.PrizeType.Value = *prizeTypeValue
+		if prizeId != nil {
+			entry.Prize = new(model.Prize)
+			entry.Prize.CreatedAt = *PrizeDate
+			entry.Prize.Id = *prizeId
+			entry.Prize.Value = *prizeTypeValue
+			entry.Prize.PrizeType = *entry.Code.PrizeType
+		}
+	}
+	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "data": entry})
 }

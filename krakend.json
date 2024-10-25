@@ -480,6 +480,26 @@
       "input_headers": [
           "Authorization","Content-Type","User-Agent","Host"
       ]
+    },
+    {
+      "endpoint": "/api/v1/entry/{entry_id}",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/api/v1/entry/{entry_id}",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "GET",
+          "host": [
+            "http://web-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ],
+      "input_headers": [
+          "Authorization","Content-Type","User-Agent","Host"
+      ]
     }
   ]
 }

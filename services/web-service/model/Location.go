@@ -12,7 +12,7 @@ type Province struct {
 type District struct {
 	Id        int       `json:"id"`
 	Name      string    `json:"name"`
-	Province  Province  `json:"province,omitempty"`
+	Province  Province  `json:"-"`
 	CreatedAt time.Time `json:"-"`
 	UpdatedAt time.Time `json:"-"`
 }

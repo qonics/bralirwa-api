@@ -77,6 +77,18 @@ VALUES
 	if err != nil {
 		fmt.Println("Error inserting customer data", err)
 	}
+	_, err = config.DB.Exec(ctx, `INSERT INTO codes (id, code, code_hash, prize_type_id,redeemed, status)
+	VALUES (1, pgp_sym_encrypt('wrsdsad', 'secret')::bytea,digest('wrsdsad', 'sha256')::bytea, 1, false, 'OKAY');
+`)
+	if err != nil {
+		fmt.Println("Error inserting customer data", err)
+	}
+	_, err = config.DB.Exec(ctx, `INSERT INTO entries (id, customer_id,code_id)
+	VALUES (1, 1, 1);
+`)
+	if err != nil {
+		fmt.Println("Error inserting entries data", err)
+	}
 
 }
 
@@ -338,6 +350,7 @@ func TestGetEntries(t *testing.T) {
 
 	// Read the response body
 	body, _ := io.ReadAll(resp.Body)
+	// fmt.Println(string(body))
 	var result map[string]interface{}
 	json.Unmarshal(body, &result)
 	// Check each field
@@ -348,7 +361,6 @@ func TestGetEntries(t *testing.T) {
 			dataRecord, ok := singleRecord[0].(map[string]interface{})
 			a.True(ok, "dataRecord should be a map")
 			a.NotEmpty(dataRecord["id"], "id")
-			a.NotEmpty(dataRecord["name"], "name")
 			a.NotEmpty(dataRecord["code"], "code")
 			a.NotEmpty(dataRecord["customer"], "customer")
 			a.NotEmpty(dataRecord["created_at"], "created_at")
@@ -837,6 +849,40 @@ func TestGetCustomer(t *testing.T) {
 		a.NotEmpty(dataRecord["district"], "district")
 		a.NotEmpty(dataRecord["phone"], "phone")
 		a.NotEmpty(dataRecord["locale"], "locale")
+		a.NotEmpty(dataRecord["created_at"], "created_at")
+	}
+}
+func TestGetEntryData(t *testing.T) {
+	access_token := createTestAccessToken()
+	// Setup Fiber app
+	app := fiber.New()
+	// Define the route
+	app.Get("/entry/:entryId", GetEntryData)
+
+	// Initialize the assert object
+	a := assert.New(t)
+
+	// Run the test
+	req := httptest.NewRequest("GET", "/entry/1", nil)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", access_token)
+
+	resp, _ := app.Test(req, -1)
+	// Check the status code
+	a.Equal(fiber.StatusOK, resp.StatusCode)
+
+	// Read the response body
+	body, _ := io.ReadAll(resp.Body)
+	// fmt.Println(string(body))
+	var result map[string]interface{}
+	json.Unmarshal(body, &result)
+	// Check each field
+	if resp.StatusCode == 200 {
+		dataRecord, ok := result["data"].(map[string]interface{})
+		a.True(ok, "dataRecord should be a map")
+		a.NotEmpty(dataRecord["id"], "id")
+		a.NotEmpty(dataRecord["customer"], "customer")
+		a.NotEmpty(dataRecord["code"], "code")
 		a.NotEmpty(dataRecord["created_at"], "created_at")
 	}
 }

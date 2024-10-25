@@ -1,12 +1,12 @@
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: lottery-pv1
+  name: pg-pv
 spec:
   capacity:
-    storage: 1Gi
+    storage: 50Gi
   accessModes:
     - ReadWriteOnce
   storageClassName: manual
   hostPath:
-    path: /data/lottery-pv1
+    path: /data/pg-pv

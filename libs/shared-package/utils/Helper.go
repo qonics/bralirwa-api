@@ -1,14 +1,17 @@
 package utils
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	mathRand "math/rand"
+	"net/http"
 	"os"
 	"reflect"
 	"regexp"
@@ -16,6 +19,7 @@ import (
 	"strings"
 	"time"
 	"unsafe"
+	"ussd-service/config"
 	"web-service/model"
 
 	"github.com/go-playground/validator/v10"
@@ -398,4 +402,101 @@ func GenerateRandomCapitalLetter(length int) string {
 		result[i] = letters[mathRand.Intn(len(letters))]
 	}
 	return string(result)
+}
+
+// validate mtn phone number and return names when it is valid, and error if any
+func ValidateMTNPhone(phoneNumber string) (string, error) {
+	//send http json request
+	request, err := http.NewRequest("GET", fmt.Sprintf("%sapi/v1/momo/accountholder/information/%s", viper.GetString("MOMO_URL"), phoneNumber), nil)
+	if err != nil {
+		return "", err
+	}
+	request.Header.Set("Authorization", viper.GetString("MOMO_KEY"))
+	request.Header.Set("Content-Type", "application/json")
+	client := &http.Client{}
+	resp, err := client.Do(request)
+	if err != nil {
+		return "", err
+	}
+	// Read the response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	var result map[string]interface{}
+	err = json.Unmarshal(body, &result)
+	if err != nil {
+		return "", err
+	}
+	if res, ok := result["status"].(float64); ok {
+		if res != 200 {
+			error_message, ok := result["message"].(string)
+			if !ok {
+				return "", errors.New("failed to validate phone number, err: " + error_message)
+			}
+			if error_message == "ACCOUNTHOLDER_NOT_FOUND" || error_message == "END_USER_SERVICE_DENIED" ||
+				error_message == "RESOURCE_NOT_FOUND" || error_message == "AUTHORIZATION_RECEIVING_ACCOUNT_NOT_ACTIVE" {
+				return "", errors.New("phone_error_momo")
+			}
+			return "", errors.New("failed to validate phone number, err: " + result["message"].(string))
+		}
+	} else {
+		LogMessage("critical", "ValidateMTNPhone: failed to validate phone number, system error, body: "+string(body), "ussd-service")
+		return "", errors.New("failed to validate phone number, system error")
+	}
+	names := result["firstname"].(string) + " " + result["lastname"].(string)
+	return names, nil
+}
+
+// send sms, return message_id on success and error if any
+func SendSMS(phoneNumber string, message string, senderName string, serviceName string, messageType string, customerId int) (string, error) {
+	payload := map[string]interface{}{
+		"sender_id": senderName,
+		"phone":     phoneNumber,
+		"message":   message,
+	}
+	jsonData, _ := json.Marshal(payload)
+	//send http json request
+	request, err := http.NewRequest("POST", fmt.Sprintf("%s/api/v1/send_sms", viper.GetString("SMS_URL")), bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", err
+	}
+	request.Header.Set("x-api-key", viper.GetString("SMS_KEY"))
+	request.Header.Set("Content-Type", "application/json")
+	client := &http.Client{}
+	resp, err := client.Do(request)
+	error_message := ""
+	if err != nil {
+		error_message = err.Error()
+	}
+	// Read the response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		error_message = err.Error()
+	}
+	var result map[string]interface{}
+	err = json.Unmarshal(body, &result)
+	if err != nil {
+		error_message = err.Error()
+	}
+	messageId := ""
+	if res, ok := result["status"].(float64); ok {
+		if res != 200 {
+			error_message = "failed to send sms, err: " + result["message"].(string)
+		}
+		messageId = result["message_id"].(string)
+	} else {
+		LogMessage("critical", "SendSMS: failed to send sms, system error, body: "+string(body), serviceName)
+		error_message = "failed to send sms, system error"
+	}
+	status := "SENT"
+	if error_message != "" {
+		status = "FAILED"
+	}
+	_, err = config.DB.Exec(ctx, "INSERT INTO sms (customer_id, message, type, status, message_id, credit_count, error_message) VALUES ($1, $2, $3, $4, $5, 0, $6)",
+		customerId, message, messageType, status, messageId, error_message)
+	if err != nil {
+		LogMessage("critical", "SendSMS: failed to save sms, err: "+err.Error(), serviceName)
+	}
+	return messageId, nil
 }

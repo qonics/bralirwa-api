@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS customer (
     id SERIAL PRIMARY KEY,
     names BYTEA NOT NULL,
+    momo_names BYTEA NULL,
     phone BYTEA NOT NULL,
     phone_hash BYTEA NOT NULL UNIQUE,
     network_operator VARCHAR(20),

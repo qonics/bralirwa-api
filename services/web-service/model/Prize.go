@@ -30,12 +30,12 @@ type PrizeType struct {
 
 type Prize struct {
 	Id            int           `json:"id"`
-	PrizeType     PrizeType     `json:"prize_type"`
-	PrizeCategory PrizeCategory `json:"prize_category"`
-	Value         int           `json:"value"`
-	Code          string        `json:"code"`
-	Rewarded      bool          `json:"rewarded"`
-	Customer      Customer      `json:"customer"`
-	CreatedAt     time.Time     `json:"created_at"`
+	PrizeType     PrizeType     `json:"prize_type,omitempty"`
+	PrizeCategory PrizeCategory `json:"prize_category,omitempty"`
+	Value         int           `json:"value,omitempty"`
+	Code          string        `json:"code,omitempty"`
+	Rewarded      bool          `json:"rewarded,omitempty"`
+	Customer      Customer      `json:"customer,omitempty"`
+	CreatedAt     time.Time     `json:"created_at,omitempty"`
 	UpdatedAt     time.Time     `json:"-"`
 }
