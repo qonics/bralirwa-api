@@ -14,6 +14,7 @@ require (
 	github.com/lib/pq v1.10.9
 	github.com/spf13/viper v1.18.2
 	github.com/stretchr/testify v1.9.0
+	golang.org/x/crypto v0.27.0
 )
 
 require (
@@ -30,7 +31,6 @@ require (
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/valyala/fasthttp v1.51.0 // indirect
 	go.uber.org/atomic v1.9.0 // indirect
-	golang.org/x/crypto v0.27.0 // indirect
 	golang.org/x/net v0.29.0 // indirect
 	golang.org/x/sync v0.8.0 // indirect
 )

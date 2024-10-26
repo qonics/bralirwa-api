@@ -9,6 +9,7 @@ import (
 
 var Redis *redis.Client
 var EncryptionKey string
+var ServiceName string = "web-service"
 
 func InitializeConfig() {
 	EncryptionKey = viper.GetString("encryption_key")
