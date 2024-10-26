@@ -57,7 +57,11 @@ func InitRoutes() *fiber.App {
 	v1.Get("/entry/:entryId", controller.GetEntryData)
 	v1.Get("/customer_entry_history/:customerId", controller.GetUserProfile)
 	v1.Post("/upload_codes", controller.GetUserProfile)
+	v1.Post("/change_password", controller.ChangePassword)
+	v1.Post("/forgot_password", controller.ForgotPassword)
+	v1.Post("/set_password", controller.SetNewPassword)
+	v1.Post("/validate_otp", controller.ValidateOTP)
+	v1.Post("/verify_otp", controller.ValidateOTP)
 	v1.Get("/avatar/svg/:type/:avatar_number", controller.GetSVGAvatar)
-
 	return app
 }

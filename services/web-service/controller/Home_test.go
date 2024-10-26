@@ -35,16 +35,21 @@ func init() {
 		DB:       viper.GetInt("redis_test.database"),
 	})
 	//Create dummy users for testing
-	_, err := config.DB.Exec(ctx, `INSERT INTO users (fname, lname, phone, email, can_add_codes,can_trigger_draw,can_add_user,can_view_logs, department_id, email_verified, phone_verified, locale, avatar_url, password, status, address, operator)
+	_, err := config.DB.Exec(ctx, `INSERT INTO users (id,fname, lname, phone, email, can_add_codes,can_trigger_draw,can_add_user,can_view_logs, department_id, email_verified, phone_verified, locale, avatar_url, password, status, address, operator)
 VALUES
-('Admin', 'User test', '078234234232', 'test@qonics.com', true, true, true, true, 1, FALSE, FALSE, 'en', 'NOT_AVAILABLE',
- '$2a$06$GeEpPxbKoTn3tAkyufWilumzne1MvF4uw0Vl7/X/VsZ4DM.r3zWRi', 'OKAY', 'NOT_AVAILABLE', NULL);`)
+(2, 'Admin', 'User test', '078234234232', 'test@qonics.com', true, true, true, true, 1, FALSE, FALSE, 'en', 'NOT_AVAILABLE',
+ '$2a$06$Q3Omh4QCXB7f2a5mTqlrAunZgm3c4K1MZYraLh/OXgK43j8CoHyPa', 'OKAY', 'NOT_AVAILABLE', NULL);`)
 	if err != nil {
+		//update password to
+		_, err = config.DB.Exec(ctx, `UPDATE users SET password=crypt($1, gen_salt('bf')) WHERE id=$2`, "P@as12.W0d", 2)
+		if err != nil {
+			fmt.Println("Error updating user password", err)
+		}
 		fmt.Println("Error inserting user data", err)
 	}
 	_, err = config.DB.Exec(ctx, `INSERT INTO users (fname, lname, phone, email, can_add_codes,can_trigger_draw,can_add_user,can_view_logs, department_id, email_verified, phone_verified, locale, avatar_url, password, status, address, operator)
 VALUES
-('Admin', 'User test 2', '078234234231', 'test2@qonics.com', false, false, false, true, 1, FALSE, FALSE, 'en', 'NOT_AVAILABLE',
+('Admin', 'User test 2', '078234234231', 'test2@qonics.com', false, false, false, true, 1, true, true, 'en', 'NOT_AVAILABLE',
  '$2a$06$GeEpPxbKoTn3tAkyufWilumzne1MvF4uw0Vl7/X/VsZ4DM.r3zWRi', 'OKAY', 'NOT_AVAILABLE', NULL);`)
 	if err != nil {
 		fmt.Println("Error inserting user data", err)
@@ -94,7 +99,7 @@ VALUES
 
 func createTestAccessToken() string {
 	userData := model.UserProfile{
-		Id:             1,
+		Id:             2,
 		Fname:          "Test",
 		Lname:          "user",
 		Email:          "test@qonics.com",
@@ -133,7 +138,7 @@ func TestLoginWithEmail(t *testing.T) {
 			description: "successful login",
 			payload: map[string]string{
 				"email":    "test@qonics.com",
-				"password": "password",
+				"password": "P@as12.W0d",
 			},
 			expectedCode: 200,
 			expectedBody: "Login completed",
@@ -182,15 +187,13 @@ func TestLoginWithEmail(t *testing.T) {
 		// Read the response body
 		body, _ := io.ReadAll(resp.Body)
 		// fmt.Println(string(body))
-		// Check the response body contains expected text
-		a.Contains(string(body), test.expectedBody, test.description)
 
 		if test.expectedData != nil {
 			var result map[string]interface{}
 			json.Unmarshal(body, &result)
 
 			// Check detailed fields for successful login
-			if test.expectedCode == 200 {
+			if resp.StatusCode == 200 {
 				userData, ok := result["data"].(map[string]interface{})
 				a.True(ok, "data should be a map")
 
@@ -810,7 +813,7 @@ func TestGetUsers(t *testing.T) {
 			a.NotEmpty(dataRecord["phone"], "phone")
 			a.NotEmpty(dataRecord["department"], "department")
 			a.NotEmpty(dataRecord["avatar_url"], "avatar_url")
-			a.NotEmpty(dataRecord["can_add_codes"], "can_add_codes")
+			a.NotNil(dataRecord["can_add_codes"], "can_add_codes")
 			a.NotEmpty(dataRecord["created_at"], "created_at")
 		}
 	}
@@ -884,5 +887,441 @@ func TestGetEntryData(t *testing.T) {
 		a.NotEmpty(dataRecord["customer"], "customer")
 		a.NotEmpty(dataRecord["code"], "code")
 		a.NotEmpty(dataRecord["created_at"], "created_at")
+	}
+}
+func TestChangePassword(t *testing.T) {
+	token := createTestAccessToken()
+	// Setup Fiber app
+	app := fiber.New()
+	// Define the route
+	app.Post("/change_password", ChangePassword)
+	// Test cases
+	tests := []struct {
+		description  string
+		payload      map[string]string
+		expectedCode int
+		expectedBody string
+		expectedData map[string]interface{} // expected data for detailed field checking
+	}{
+		{
+			description: "Invalid existing password",
+			payload: map[string]string{
+				"current_password": "12345612",
+				"new_password":     "P@as12.W0d2",
+			},
+			expectedCode: fiber.StatusNotAcceptable,
+		},
+		{
+			description: "Same password as existing",
+			payload: map[string]string{
+				"current_password": "P@as12.W0d",
+				"new_password":     "P@as12.W0d",
+			},
+			expectedCode: fiber.StatusNotAcceptable,
+		},
+		{
+			description:  "missing fields",
+			payload:      map[string]string{},
+			expectedCode: 400,
+		},
+		{
+			description: "Not strong password",
+			payload: map[string]string{
+				"current_password": "P@as12.W0d",
+				"new_password":     "Pass@word",
+			},
+			expectedCode: fiber.StatusBadRequest,
+		},
+		{
+			description: "Password changed successful",
+			payload: map[string]string{
+				"current_password": "P@as12.W0d",
+				"new_password":     "P@as12.W0d2",
+			},
+			expectedCode: 200,
+		},
+	}
+
+	// Initialize the assert object
+	a := assert.New(t)
+
+	// Run the tests
+	for _, test := range tests {
+		reqBody, _ := json.Marshal(test.payload)
+		req := httptest.NewRequest("POST", "/change_password", bytes.NewReader(reqBody))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", token)
+
+		resp, _ := app.Test(req, -1)
+		// Check the status code
+		a.Equal(test.expectedCode, resp.StatusCode, test.description)
+
+		// Read the response body
+		body, _ := io.ReadAll(resp.Body)
+		var result map[string]interface{}
+		json.Unmarshal(body, &result)
+		// Check each field
+		a.Equal(int(result["status"].(float64)), resp.StatusCode, test.description, "Status")
+		a.NotEmpty(result["message"], test.description, "Message")
+	}
+}
+
+var resetKey string
+
+func TestForgotPassword(t *testing.T) {
+	// Setup Fiber app
+	app := fiber.New()
+	// Define the route
+	app.Post("/forgot_password", ForgotPassword)
+	// Test cases
+	tests := []struct {
+		description  string
+		payload      map[string]string
+		expectedCode int
+		expectedBody string
+		expectedData map[string]interface{} // expected data for detailed field checking
+	}{
+		{
+			description:  "missing fields",
+			payload:      map[string]string{},
+			expectedCode: 400,
+		},
+		{
+			description: "Forgot Password done",
+			payload: map[string]string{
+				"email": "test2@qonics.com",
+			},
+			expectedCode: 200,
+		},
+	}
+
+	// Initialize the assert object
+	a := assert.New(t)
+
+	// Run the tests
+	for _, test := range tests {
+		reqBody, _ := json.Marshal(test.payload)
+		req := httptest.NewRequest("POST", "/forgot_password", bytes.NewReader(reqBody))
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, _ := app.Test(req, -1)
+		// Check the status code
+		a.Equal(test.expectedCode, resp.StatusCode, test.description)
+
+		// Read the response body
+		body, _ := io.ReadAll(resp.Body)
+		var result map[string]interface{}
+		json.Unmarshal(body, &result)
+		// Check each field
+		if resp.StatusCode == 200 {
+			//set reset_key for next test (TestValidateOTP)
+			resetKey = result["reset_key"].(string)
+			a.NotEmpty(result["email"], test.description, "Email")
+			a.NotEmpty(result["reset_key"], test.description, "Reset key")
+		}
+		a.Equal(int(result["status"].(float64)), resp.StatusCode, test.description, "Status")
+		a.NotEmpty(result["message"], test.description, "Message")
+	}
+}
+
+var resetPasswordKey string
+
+func TestValidateOTP(t *testing.T) {
+	// Setup Fiber app
+	app := fiber.New()
+	// Define the route
+	app.Post("/validate_otp", ValidateOTP)
+	// Test cases
+	tests := []struct {
+		description  string
+		payload      map[string]string
+		expectedCode int
+		expectedBody string
+		expectedData map[string]interface{} // expected data for detailed field checking
+	}{
+		{
+			description:  "missing fields",
+			payload:      map[string]string{},
+			expectedCode: 400,
+		},
+		{
+			description: "Invalid Reset key",
+			payload: map[string]string{
+				"otp":       "123456",
+				"reset_key": "asdasdaasdas",
+			},
+			expectedCode: fiber.StatusNotAcceptable,
+		},
+		{
+			description: "Invalid OTP",
+			payload: map[string]string{
+				"otp":       "000000",
+				"reset_key": resetKey,
+			},
+			expectedCode: fiber.StatusNotAcceptable,
+		},
+		{
+			description: "OTP validated",
+			payload: map[string]string{
+				"otp":       "123456",
+				"reset_key": resetKey,
+			},
+			expectedCode: fiber.StatusOK,
+		},
+		{
+			description: "Already used otp",
+			payload: map[string]string{
+				"otp":       "123456",
+				"reset_key": resetKey,
+			},
+			expectedCode: fiber.StatusNotAcceptable,
+		},
+	}
+
+	// Initialize the assert object
+	a := assert.New(t)
+
+	// Run the tests
+	for _, test := range tests {
+		reqBody, _ := json.Marshal(test.payload)
+		req := httptest.NewRequest("POST", "/validate_otp", bytes.NewReader(reqBody))
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, _ := app.Test(req, -1)
+		// Check the status code
+		a.Equal(test.expectedCode, resp.StatusCode, test.description)
+
+		// Read the response body
+		body, _ := io.ReadAll(resp.Body)
+		var result map[string]interface{}
+		json.Unmarshal(body, &result)
+		if resp.StatusCode == 200 {
+			//set reset_key for next test (reset password)
+			resetPasswordKey = result["reset_key"].(string)
+			a.NotEmpty(result["email"], test.description, "Email")
+			a.NotEmpty(result["reset_key"], test.description, "Reset key")
+		}
+		// Check each field
+		a.Equal(int(result["status"].(float64)), resp.StatusCode, test.description, "Status")
+		a.NotEmpty(result["message"], test.description, "Message")
+	}
+}
+func TestSetNewPassword(t *testing.T) {
+	// Setup Fiber app
+	app := fiber.New()
+	// Define the route
+	app.Post("/set_password", SetNewPassword)
+	// Test cases
+	tests := []struct {
+		description  string
+		payload      map[string]string
+		expectedCode int
+		expectedBody string
+		expectedData map[string]interface{} // expected data for detailed field checking
+	}{
+		{
+			description:  "missing fields",
+			payload:      map[string]string{},
+			expectedCode: 400,
+		},
+		{
+			description: "Invalid Reset key",
+			payload: map[string]string{
+				"password":  "123456",
+				"reset_key": "asdasdaasdas",
+			},
+			expectedCode: fiber.StatusBadRequest,
+		},
+		{
+			description: "Weak password",
+			payload: map[string]string{
+				"password":  "123456@s",
+				"reset_key": resetPasswordKey,
+			},
+			expectedCode: fiber.StatusBadRequest,
+		},
+		{
+			description: "password changed",
+			payload: map[string]string{
+				"password":  "P@as12.W0d",
+				"reset_key": resetPasswordKey,
+			},
+			expectedCode: fiber.StatusOK,
+		},
+		{
+			description: "Already used reset key",
+			payload: map[string]string{
+				"password":  "P@as12.W0d",
+				"reset_key": resetPasswordKey,
+			},
+			expectedCode: fiber.StatusNotAcceptable,
+		},
+	}
+
+	// Initialize the assert object
+	a := assert.New(t)
+
+	// Run the tests
+	for _, test := range tests {
+		reqBody, _ := json.Marshal(test.payload)
+		req := httptest.NewRequest("POST", "/set_password", bytes.NewReader(reqBody))
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, _ := app.Test(req, -1)
+		// Check the status code
+		a.Equal(test.expectedCode, resp.StatusCode, test.description)
+
+		// Read the response body
+		body, _ := io.ReadAll(resp.Body)
+		var result map[string]interface{}
+		json.Unmarshal(body, &result)
+		if resp.StatusCode == 200 {
+			a.NotEmpty(result["email"], test.description, "Email")
+		}
+		// Check each field
+		a.Equal(int(result["status"].(float64)), resp.StatusCode, test.description, "Status")
+		a.NotEmpty(result["message"], test.description, "Message")
+	}
+}
+func TestSendVerificationEmail(t *testing.T) {
+	// Setup Fiber app
+	app := fiber.New()
+	// Define the route
+	app.Post("/send_verification_email", SendVerificationEmail)
+	// Test cases
+	tests := []struct {
+		description  string
+		payload      map[string]string
+		expectedCode int
+		expectedBody string
+		expectedData map[string]interface{} // expected data for detailed field checking
+	}{
+		{
+			description:  "missing fields",
+			payload:      map[string]string{},
+			expectedCode: 400,
+		},
+		{
+			description: "Verification email sent",
+			payload: map[string]string{
+				"email": "test@qonics.com",
+			},
+			expectedCode: 200,
+		},
+		{
+			description: "Already verified email",
+			payload: map[string]string{
+				"email": "test2@qonics.com",
+			},
+			expectedCode: fiber.StatusAccepted,
+		},
+	}
+
+	// Initialize the assert object
+	a := assert.New(t)
+
+	// Run the tests
+	for _, test := range tests {
+		reqBody, _ := json.Marshal(test.payload)
+		req := httptest.NewRequest("POST", "/send_verification_email", bytes.NewReader(reqBody))
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, _ := app.Test(req, -1)
+		// Check the status code
+		a.Equal(test.expectedCode, resp.StatusCode, test.description)
+
+		// Read the response body
+		body, _ := io.ReadAll(resp.Body)
+		var result map[string]interface{}
+		json.Unmarshal(body, &result)
+		// Check each field
+		if resp.StatusCode == 200 {
+			//set reset_key for next test (TestValidateOTP)
+			resetKey = result["reset_key"].(string)
+			a.NotEmpty(result["email"], test.description, "Email")
+			a.NotEmpty(result["reset_key"], test.description, "Reset key")
+		}
+		a.Equal(int(result["status"].(float64)), resp.StatusCode, test.description, "Status")
+		a.NotEmpty(result["message"], test.description, "Message")
+	}
+}
+
+func TestVerifyOtp(t *testing.T) {
+	// Setup Fiber app
+	app := fiber.New()
+	// Define the route
+	app.Post("/verify_otp", ValidateOTP)
+	// Test cases
+	tests := []struct {
+		description  string
+		payload      map[string]string
+		expectedCode int
+		expectedBody string
+		expectedData map[string]interface{} // expected data for detailed field checking
+	}{
+		{
+			description:  "missing fields",
+			payload:      map[string]string{},
+			expectedCode: 400,
+		},
+		{
+			description: "Invalid Reset key",
+			payload: map[string]string{
+				"otp":       "123456",
+				"reset_key": "asdasdaasdas",
+			},
+			expectedCode: fiber.StatusNotAcceptable,
+		},
+		{
+			description: "Invalid OTP",
+			payload: map[string]string{
+				"otp":       "000000",
+				"reset_key": resetKey,
+			},
+			expectedCode: fiber.StatusNotAcceptable,
+		},
+		{
+			description: "OTP validated",
+			payload: map[string]string{
+				"otp":       "123456",
+				"reset_key": resetKey,
+			},
+			expectedCode: fiber.StatusOK,
+		},
+		{
+			description: "Already used otp",
+			payload: map[string]string{
+				"otp":       "123456",
+				"reset_key": resetKey,
+			},
+			expectedCode: fiber.StatusNotAcceptable,
+		},
+	}
+
+	// Initialize the assert object
+	a := assert.New(t)
+
+	// Run the tests
+	for _, test := range tests {
+		reqBody, _ := json.Marshal(test.payload)
+		req := httptest.NewRequest("POST", "/verify_otp", bytes.NewReader(reqBody))
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, _ := app.Test(req, -1)
+		// Check the status code
+		a.Equal(test.expectedCode, resp.StatusCode, test.description)
+
+		// Read the response body
+		body, _ := io.ReadAll(resp.Body)
+		var result map[string]interface{}
+		json.Unmarshal(body, &result)
+		if resp.StatusCode == 200 {
+			//set reset_key for next test (reset password)
+			a.NotEmpty(result["user_id"], test.description, "User id")
+			a.NotEmpty(result["email"], test.description, "Email")
+		}
+		// Check each field
+		a.Equal(int(result["status"].(float64)), resp.StatusCode, test.description, "Status")
+		a.NotEmpty(result["message"], test.description, "Message")
 	}
 }

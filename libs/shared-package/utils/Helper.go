@@ -17,7 +17,9 @@ import (
 	"regexp"
 	"shared-package/proto"
 	"strings"
+	"text/template"
 	"time"
+	"unicode"
 	"unsafe"
 	"ussd-service/config"
 	"web-service/model"
@@ -39,6 +41,7 @@ var ctx = context.Background()
 var SessionExpirationTime time.Duration = 1800
 var CachePrefix string = "CACHE_MANAGER_"
 
+const otpChars = "1234567890"
 const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 const (
 	letterIdxBits = 6                    // 6 bits to represent a letter index
@@ -449,7 +452,11 @@ func ValidateMTNPhone(phoneNumber string) (string, error) {
 }
 
 // send sms, return message_id on success and error if any
-func SendSMS(phoneNumber string, message string, senderName string, serviceName string, messageType string, customerId int) (string, error) {
+func SendSMS(phoneNumber string, message string, senderName string, serviceName string, messageType string, customerId *int) (string, error) {
+	//skip this if it is test
+	if IsTestMode {
+		return "TEST_SMS_ID", nil
+	}
 	payload := map[string]interface{}{
 		"sender_id": senderName,
 		"phone":     phoneNumber,
@@ -494,9 +501,105 @@ func SendSMS(phoneNumber string, message string, senderName string, serviceName 
 		status = "FAILED"
 	}
 	_, err = config.DB.Exec(ctx, "INSERT INTO sms (customer_id, message, type, status, message_id, credit_count, error_message) VALUES ($1, $2, $3, $4, $5, 0, $6)",
-		customerId, message, messageType, status, messageId, error_message)
+		&customerId, message, messageType, status, messageId, error_message)
 	if err != nil {
 		LogMessage("critical", "SendSMS: failed to save sms, err: "+err.Error(), serviceName)
 	}
 	return messageId, nil
+}
+
+// IsStrongPassword checks if the given password is strong from validator, you will register customer validator and use it .
+//
+// # Minimum 8 characters
+//
+// # Contains at least one digit
+//
+// # Contains at least one uppercase letter
+//
+// # Contains at least one lowercase letter
+//
+// # Contains at least one special character
+//
+// # No three successive similar special characters, text, or numbers
+//
+// Args:
+//
+//	password (validator.FieldLevel): a password you want to validate
+//
+// Returns:
+//
+//	bool: true for strong password and false for weak password
+//
+// Examples:
+//
+//	IsStrongPassword("MyStr0ngP@ssw0rd") // true
+//
+//	IsStrongPassword("weak") // false
+func IsStrongPassword(fl validator.FieldLevel) bool {
+	password := fl.Field().String()
+	if len(password) < 8 {
+		return false
+	}
+
+	hasDigit := false
+	hasUpper := false
+	hasLower := false
+	hasSpecial := false
+
+	for i, char := range password {
+		switch {
+		case unicode.IsDigit(char):
+			hasDigit = true
+		case unicode.IsUpper(char):
+			hasUpper = true
+		case unicode.IsLower(char):
+			hasLower = true
+		case unicode.IsPunct(char) || unicode.IsSymbol(char):
+			hasSpecial = true
+		}
+
+		// Check for three successive similar characters
+		if i >= 2 && password[i] == password[i-1] && password[i-1] == password[i-2] {
+			return false
+		}
+	}
+	return hasDigit && hasUpper && hasLower && hasSpecial
+}
+func GenerateOTP(length int) (string, error) {
+	buffer := make([]byte, length)
+	_, err := rand.Read(buffer)
+	if err != nil {
+		return "", err
+	}
+	otpCharsLength := len(otpChars)
+	for i := 0; i < length; i++ {
+		buffer[i] = otpChars[int(buffer[i])%otpCharsLength]
+	}
+	return string(buffer), nil
+}
+func GenerateHtmlTemplate(filename string, emailData any) (string, error) {
+	filename = strings.Replace(filename, ".html", "", -1)
+	filepath := fmt.Sprintf("/app/templates/%s.html", filename)
+	if IsTestMode {
+		filepath = fmt.Sprintf("../templates/%s.html", filename)
+	}
+	tmpl, err := template.ParseFiles(filepath)
+	if err != nil {
+		return "", errors.New("error parsing template: " + err.Error())
+	}
+
+	// Render the template to a string
+	var body bytes.Buffer
+	if err := tmpl.Execute(&body, emailData); err != nil {
+		return "", errors.New("error rendering template: " + err.Error())
+	}
+	return body.String(), nil
+}
+func SendEmail(to string, subject string, body string, serviceName string) string {
+	//skip this if it is test
+	if IsTestMode {
+		return "Email sent"
+	}
+	//TODO: send email
+	return "Email sent"
 }

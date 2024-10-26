@@ -500,6 +500,106 @@
       "input_headers": [
           "Authorization","Content-Type","User-Agent","Host"
       ]
+    },
+    {
+      "endpoint": "/api/v1/change_password",
+      "method": "POST",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/api/v1/change_password",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "POST",
+          "host": [
+            "http://web-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ],
+      "input_headers": [
+          "Authorization","Content-Type","User-Agent","Host"
+      ]
+    },
+    {
+      "endpoint": "/api/v1/forgot_password",
+      "method": "POST",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/api/v1/forgot_password",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "POST",
+          "host": [
+            "http://web-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ],
+      "input_headers": [
+          "Authorization","Content-Type","User-Agent","Host"
+      ]
+    },
+    {
+      "endpoint": "/api/v1/set_password",
+      "method": "POST",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/api/v1/set_password",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "POST",
+          "host": [
+            "http://web-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ],
+      "input_headers": [
+          "Authorization","Content-Type","User-Agent","Host"
+      ]
+    },
+    {
+      "endpoint": "/api/v1/validate_otp",
+      "method": "POST",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/api/v1/validate_otp",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "POST",
+          "host": [
+            "http://web-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ],
+      "input_headers": [
+          "Authorization","Content-Type","User-Agent","Host"
+      ]
+    },
+    {
+      "endpoint": "/api/v1/verify_otp",
+      "method": "POST",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/api/v1/verify_otp",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "POST",
+          "host": [
+            "http://web-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ],
+      "input_headers": [
+          "Authorization","Content-Type","User-Agent","Host"
+      ]
     }
   ]
 }

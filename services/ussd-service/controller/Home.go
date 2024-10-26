@@ -647,7 +647,7 @@ func completeRegistration(args ...interface{}) string {
 	}
 	//TODO: instant prize
 	sms_message := utils.Localize(localizer, "register_sms", nil)
-	go utils.SendSMS(args[3].(string), sms_message, viper.GetString("SENDER_ID"), config.ServiceName, "registration", customerId)
+	go utils.SendSMS(args[3].(string), sms_message, viper.GetString("SENDER_ID"), config.ServiceName, "registration", &customerId)
 	return "success_entry"
 }
 func removeCustomer(customerId int) {
