@@ -33,7 +33,7 @@ spec:
                 secretKeyRef:
                   name: postgres.postgres.credentials.postgresql.acid.zalan.do  # Name of your secret
                   key: password  # Key of your secret
-          image: qonicsinc/lottery-web-service:1.0.1
+          image: qonicsinc/lottery-web-service:1.0.2
           name: web-service
       restartPolicy: Always
       imagePullSecrets:

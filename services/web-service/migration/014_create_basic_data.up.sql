@@ -46,7 +46,7 @@ INSERT INTO district (name, province_id) VALUES
 INSERT INTO departments (id,title) VALUES
 (1,'ADMIN');
 -- Insert a user with a hashed password
- INSERT INTO users (fname, lname, phone, email, can_add_codes,can_trigger_draw,can_add_user,can_view_logs, department_id, email_verified, phone_verified, locale, avatar_url, password, status, address, operator)
+ INSERT INTO users (fname, lname, phone, email, can_add_codes,can_trigger_draw,can_add_user,can_view_logs, department_id, email_verified, phone_verified, locale, avatar_url, password, status, address, operator, force_change_password)
 VALUES
 ('Admin', 'User', '250785753712', 'hirwa@hhlinks.rw', true, true, true, true, 1, FALSE, FALSE, 'en', 'https://qonics.github.io/cdn/thumbs-1723901518138.svg',
- '$2a$06$AJeg0ORjarDookEH7QO4iOpNKS2VEnUXdP2WuR6pH8Hu.XWIwGjNC', 'OKAY', 'NOT_AVAILABLE', NULL);
+ '$2a$06$AJeg0ORjarDookEH7QO4iOpNKS2VEnUXdP2WuR6pH8Hu.XWIwGjNC', 'OKAY', 'NOT_AVAILABLE', NULL, FALSE);
