@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS users(
    can_trigger_draw BOOLEAN DEFAULT FALSE,
    can_add_user BOOLEAN DEFAULT FALSE,
    can_view_logs BOOLEAN DEFAULT FALSE,
+   force_change_password BOOLEAN DEFAULT TRUE,
    password text,
    status text,
    address text,

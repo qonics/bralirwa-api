@@ -64,17 +64,23 @@ VALUES
 		fmt.Println("Error inserting prize_category data", err)
 	}
 	// save prize type
-	_, err = config.DB.Exec(ctx, `INSERT INTO prize_type (id,name, prize_category_id, value, elligibility, status) VALUES (1,'Test Prize 1', 1, 100, 1, 'OKAY');`)
+	_, err = config.DB.Exec(ctx, `INSERT INTO prize_type (id,name, prize_category_id, value, elligibility, status,period,trigger_by_system) VALUES (1,'Test Prize 1', 1, 100, 1, 'OKAY','DAILY',false);`)
 	if err != nil {
 		fmt.Println("Error inserting prize_type data", err)
 	}
-	_, err = config.DB.Exec(ctx, `INSERT INTO prize_type (id,name, prize_category_id, value, elligibility, status) VALUES (2,'Test Prize 2', 1, 200, 5, 'OKAY');`)
+	_, err = config.DB.Exec(ctx, `INSERT INTO prize_type (id,name, prize_category_id, value, elligibility, status,period,trigger_by_system) VALUES (2,'Test Prize 2', 1, 200, 5, 'OKAY','DAILY',true);`)
 	if err != nil {
 		fmt.Println("Error inserting prize_type data", err)
 	}
-	_, err = config.DB.Exec(ctx, `INSERT INTO prize_type (id,name, prize_category_id, value, elligibility, status) VALUES (3,'Test Prize 3', 2, 100, 2, 'OKAY');`)
+	_, err = config.DB.Exec(ctx, `INSERT INTO prize_type (id,name, prize_category_id, value, elligibility, status,period,trigger_by_system) VALUES (3,'Test Prize 3', 2, 100, 2, 'OKAY','WEEKLY',false);`)
 	if err != nil {
 		fmt.Println("Error inserting prize_type data", err)
+	}
+	_, err = config.DB.Exec(ctx, `INSERT INTO prize_message (id, message, lang, prize_type_id,operator_id)
+	VALUES (1, 'Congratulation, you won a prize','en',1, 1);
+`)
+	if err != nil {
+		fmt.Println("Error inserting prize_message data", err)
 	}
 	_, err = config.DB.Exec(ctx, `INSERT INTO customer (id, names,phone,phone_hash,province,district,locale,network_operator)
 	VALUES (1, pgp_sym_encrypt('KALISA Doe', 'secret'),pgp_sym_encrypt('250785753712', 'secret')::bytea,digest('250785753712', 'sha256')::bytea,5,3,'en','MTN');
@@ -86,15 +92,18 @@ VALUES
 	VALUES (1, pgp_sym_encrypt('wrsdsad', 'secret')::bytea,digest('wrsdsad', 'sha256')::bytea, 1, false, 'OKAY');
 `)
 	if err != nil {
-		fmt.Println("Error inserting customer data", err)
+		fmt.Println("Error inserting code data", err)
 	}
 	_, err = config.DB.Exec(ctx, `INSERT INTO entries (id, customer_id,code_id)
 	VALUES (1, 1, 1);
 `)
 	if err != nil {
+		//update entry created_at to current date
+		_, err = config.DB.Exec(ctx, `UPDATE entries SET created_at=$1 WHERE id=$2`, time.Now(), 1)
 		fmt.Println("Error inserting entries data", err)
 	}
-
+	config.DB.Exec(ctx, `truncate draw CASCADE;`)
+	config.DB.Exec(ctx, `truncate prize CASCADE;`)
 }
 
 func createTestAccessToken() string {
@@ -282,7 +291,6 @@ func TestGetPrizeType(t *testing.T) {
 			a.NotEmpty(dataRecord["status"], "status")
 			a.NotEmpty(dataRecord["messages"], "messages")
 			a.NotEmpty(dataRecord["period"], "period")
-			a.NotEmpty(dataRecord["expiry_date"], "expiry_date")
 			a.NotEmpty(dataRecord["distribution"], "distribution")
 		}
 	}
@@ -327,7 +335,6 @@ func TestGetPrizeTypeByCategory(t *testing.T) {
 		a.NotEmpty(dataRecord["status"], "status")
 		a.NotEmpty(dataRecord["messages"], "messages")
 		a.NotEmpty(dataRecord["period"], "period")
-		a.NotEmpty(dataRecord["expiry_date"], "expiry_date")
 		a.NotEmpty(dataRecord["distribution"], "distribution")
 	}
 }
@@ -533,13 +540,14 @@ func TestCreatePrizeType(t *testing.T) {
 		{
 			description: "Success",
 			payload: map[string]any{
-				"name":         uniqueName,
-				"category_id":  1,
-				"value":        100,
-				"elligibility": 1,
-				"expiry_date":  "25/12/2024",
-				"distribution": "momo",
-				"period":       "weekly",
+				"name":              uniqueName,
+				"category_id":       1,
+				"value":             100,
+				"elligibility":      1,
+				"expiry_date":       "25/12/2024",
+				"distribution":      "momo",
+				"period":            "weekly",
+				"trigger_by_system": true,
 				"messages": []map[string]any{
 					{"message": "Congratulations, you have won a prize", "lang": "en"},
 					{"message": "Mwatsindiye ibihembo", "lang": "rw"},
@@ -554,13 +562,14 @@ func TestCreatePrizeType(t *testing.T) {
 		{
 			description: "Duplicate",
 			payload: map[string]any{
-				"name":         uniqueName,
-				"category_id":  1,
-				"value":        100,
-				"elligibility": 1,
-				"expiry_date":  "25/12/2024",
-				"distribution": "momo",
-				"period":       "weekly",
+				"name":              uniqueName,
+				"category_id":       1,
+				"value":             100,
+				"elligibility":      1,
+				"expiry_date":       "25/12/2024",
+				"distribution":      "momo",
+				"period":            "weekly",
+				"trigger_by_system": true,
 				"messages": []map[string]any{
 					{"message": "Congratulations, you have won a prize", "lang": "en"},
 					{"message": "Mwatsindiye ibihembo", "lang": "rw"},
@@ -575,13 +584,14 @@ func TestCreatePrizeType(t *testing.T) {
 		{
 			description: "Invalid name",
 			payload: map[string]any{
-				"name":         "CAR%42",
-				"category_id":  1,
-				"value":        100,
-				"elligibility": 1,
-				"expiry_date":  "25/12/2024",
-				"distribution": "momo",
-				"period":       "weekly",
+				"name":              "CAR%42",
+				"category_id":       1,
+				"value":             100,
+				"elligibility":      1,
+				"expiry_date":       "25/12/2024",
+				"distribution":      "momo",
+				"period":            "weekly",
+				"trigger_by_system": true,
 				"messages": []map[string]any{
 					{"message": "Congratulations, you have won a prize", "lang": "en"},
 					{"message": "Mwatsindiye ibihembo", "lang": "rw"},
@@ -592,13 +602,14 @@ func TestCreatePrizeType(t *testing.T) {
 		{
 			description: "expired date",
 			payload: map[string]any{
-				"name":         "CAR-42",
-				"category_id":  1,
-				"value":        100,
-				"elligibility": 1,
-				"expiry_date":  "23/10/2024",
-				"distribution": "momo",
-				"period":       "weekly",
+				"name":              "CAR-42",
+				"category_id":       1,
+				"value":             100,
+				"elligibility":      1,
+				"expiry_date":       "23/10/2024",
+				"distribution":      "momo",
+				"period":            "weekly",
+				"trigger_by_system": true,
 				"messages": []map[string]any{
 					{"message": "Congratulations, you have won a prize", "lang": "en"},
 					{"message": "Mwatsindiye ibihembo", "lang": "rw"},
@@ -609,13 +620,14 @@ func TestCreatePrizeType(t *testing.T) {
 		{
 			description: "Invalid category id",
 			payload: map[string]any{
-				"name":         "CAR 42",
-				"category_id":  -1,
-				"value":        100,
-				"elligibility": 1,
-				"expiry_date":  "25/12/2024",
-				"distribution": "momo",
-				"period":       "weekly",
+				"name":              "CAR 42",
+				"category_id":       -1,
+				"value":             100,
+				"elligibility":      1,
+				"expiry_date":       "25/12/2024",
+				"distribution":      "momo",
+				"period":            "weekly",
+				"trigger_by_system": true,
 				"messages": []map[string]any{
 					{"message": "Congratulations, you have won a prize", "lang": "en"},
 					{"message": "Mwatsindiye ibihembo", "lang": "rw"},
@@ -1323,5 +1335,87 @@ func TestVerifyOtp(t *testing.T) {
 		// Check each field
 		a.Equal(int(result["status"].(float64)), resp.StatusCode, test.description, "Status")
 		a.NotEmpty(result["message"], test.description, "Message")
+	}
+}
+func TestStartPrizeDraw(t *testing.T) {
+	token := createTestAccessToken()
+	// Setup Fiber app
+	app := fiber.New()
+	// Define the route
+	app.Post("/draw", StartPrizeDraw)
+	// Test cases
+	tests := []struct {
+		description  string
+		payload      map[string]any
+		expectedCode int
+		expectedBody string
+		expectedData map[string]interface{} // expected data for detailed field checking
+	}{
+		{
+			description: "success",
+			payload: map[string]any{
+				"prize_type": 1,
+			},
+			expectedCode: fiber.StatusOK,
+		},
+		{
+			description: "invalid prize type",
+			payload: map[string]any{
+				"prize_type": 1001,
+			},
+			expectedCode: fiber.StatusForbidden,
+		},
+		{
+			description: "no entry found",
+			payload: map[string]any{
+				"prize_type": 3,
+			},
+			expectedCode: fiber.StatusExpectationFailed,
+		},
+		{
+			description: "system draw",
+			payload: map[string]any{
+				"prize_type": 2,
+			},
+			expectedCode: fiber.StatusNotAcceptable,
+		},
+		{
+			description:  "missing fields",
+			payload:      map[string]any{},
+			expectedCode: 400,
+		},
+	}
+
+	// Initialize the assert object
+	a := assert.New(t)
+
+	// Run the tests
+	for _, test := range tests {
+		reqBody, _ := json.Marshal(test.payload)
+		req := httptest.NewRequest("POST", "/draw", bytes.NewReader(reqBody))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", token)
+
+		resp, _ := app.Test(req, -1)
+		// Check the status code
+		a.Equal(test.expectedCode, resp.StatusCode, test.description)
+
+		// Read the response body
+		body, _ := io.ReadAll(resp.Body)
+		var result map[string]interface{}
+		json.Unmarshal(body, &result)
+		// Check each field
+		a.Equal(int(result["status"].(float64)), resp.StatusCode, test.description, "Status")
+		a.NotEmpty(result["message"], test.description, "Message")
+		if resp.StatusCode == 200 {
+			winner, ok := result["winner"].(map[string]interface{})
+			if !ok {
+				t.Errorf("Expected winner to be a map, but got %T", result["winner"])
+			}
+			a.NotEmpty(winner["prize_id"], test.description, "Prize type")
+			a.NotEmpty(winner["draw_id"], test.description, "Draw id")
+			a.NotEmpty(winner["winner"], test.description, "Winner")
+			a.NotEmpty(winner["code"], test.description, "Code")
+		}
 	}
 }

@@ -79,9 +79,9 @@ networks:
     driver: bridge
     ipam:
       config:
-        - subnet: 10.20.0.0/16
-          gateway: 10.20.0.254
-          ip_range: 10.20.0.0/24
+        - subnet: 10.21.0.0/16
+          gateway: 10.21.0.254
+          ip_range: 10.21.0.0/24
           # aux_addresses:
-          #   etcd_server: 10.20.0.253
+          #   etcd_server: 10.21.0.253
 

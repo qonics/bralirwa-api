@@ -47,7 +47,6 @@ func InitRoutes() *fiber.App {
 	v1.Get("/prizes", controller.GetPrizeType)
 	v1.Post("/prize_category", controller.CreatePrizeCategory)
 	v1.Post("/prize_type", controller.CreatePrizeType)
-	v1.Post("/draw", controller.CreatePrizeType)
 	v1.Post("/user", controller.AddUser)
 	v1.Get("/users", controller.GetUsers)
 	v1.Get("/entries", controller.GetEntries)
@@ -63,5 +62,7 @@ func InitRoutes() *fiber.App {
 	v1.Post("/validate_otp", controller.ValidateOTP)
 	v1.Post("/verify_otp", controller.ValidateOTP)
 	v1.Get("/avatar/svg/:type/:avatar_number", controller.GetSVGAvatar)
+	v1.Get("/draws", controller.GetDraws)
+	v1.Post("/draw", controller.StartPrizeDraw)
 	return app
 }

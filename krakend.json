@@ -600,6 +600,26 @@
       "input_headers": [
           "Authorization","Content-Type","User-Agent","Host"
       ]
+    },
+    {
+      "endpoint": "/api/v1/draw",
+      "method": "POST",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/api/v1/draw",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "POST",
+          "host": [
+            "http://web-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ],
+      "input_headers": [
+          "Authorization","Content-Type","User-Agent","Host"
+      ]
     }
   ]
 }

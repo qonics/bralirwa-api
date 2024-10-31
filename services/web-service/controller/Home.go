@@ -16,6 +16,8 @@ import (
 
 	"shared-package/utils"
 
+	"math/rand"
+
 	"github.com/go-playground/validator/v10"
 	"github.com/go-redis/redis/v8"
 	"github.com/gofiber/fiber/v2"
@@ -104,9 +106,9 @@ func LoginWithEmail(c *fiber.Ctx) error {
 	UserProfile := model.UserProfile{}
 	err := config.DB.QueryRow(ctx,
 		`select u.id,u.fname,u.lname,u.department_id,d.title as department_title, u.email_verified,u.phone_verified,u.avatar_url,u.status,
-	u.can_add_codes,u.can_trigger_draw,u.can_add_user,u.can_view_logs,phone from users u inner join departments d on u.department_id = d.id where email = $1 and password = crypt($2, password)`, userData.Email, userData.Password).
+	u.can_add_codes,u.can_trigger_draw,u.can_add_user,u.can_view_logs,phone,force_change_password from users u inner join departments d on u.department_id = d.id where email = $1 and password = crypt($2, password)`, userData.Email, userData.Password).
 		Scan(&UserProfile.Id, &UserProfile.Fname, &UserProfile.Lname, &UserProfile.Department.Id, &UserProfile.Department.Title, &UserProfile.EmailVerified, &UserProfile.PhoneVerified, &UserProfile.AvatarUrl, &UserProfile.Status,
-			&UserProfile.CanAddCodes, &UserProfile.CanTriggerDraw, &UserProfile.CanAddUser, &UserProfile.CanViewLogs, &UserProfile.Phone)
+			&UserProfile.CanAddCodes, &UserProfile.CanTriggerDraw, &UserProfile.CanAddUser, &UserProfile.CanViewLogs, &UserProfile.Phone, &UserProfile.ForceChangePassword)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			utils.LogMessage("critical", fmt.Sprintf("LoginWithEmail: Unable to get user data, Email:%s, err:%v", userData.Email, err), "web-service")
@@ -152,9 +154,9 @@ func GetUserProfile(c *fiber.Ctx) error {
 	UserProfile := model.UserProfile{}
 	err = config.DB.QueryRow(ctx,
 		`select u.id,u.fname,u.lname,u.department_id,d.title as department_title, u.email_verified,u.phone_verified,u.avatar_url,u.status,
-	u.can_add_codes,u.can_trigger_draw,u.can_add_user,u.can_view_logs from users u inner join departments d on u.department_id = d.id where u.id = $1`, userPayload.Id).
+	u.can_add_codes,u.can_trigger_draw,u.can_add_user,u.can_view_logs,u.phone,u.force_change_password from users u inner join departments d on u.department_id = d.id where u.id = $1`, userPayload.Id).
 		Scan(&UserProfile.Id, &UserProfile.Fname, &UserProfile.Lname, &UserProfile.Department.Id, &UserProfile.Department.Title, &UserProfile.EmailVerified, &UserProfile.PhoneVerified, &UserProfile.AvatarUrl, &UserProfile.Status,
-			&UserProfile.CanAddCodes, &UserProfile.CanTriggerDraw, &UserProfile.CanAddUser, &UserProfile.CanViewLogs)
+			&UserProfile.CanAddCodes, &UserProfile.CanTriggerDraw, &UserProfile.CanAddUser, &UserProfile.CanViewLogs, &UserProfile.Phone, &UserProfile.ForceChangePassword)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get user profile failed", utils.Logger{
@@ -387,14 +389,15 @@ func CreatePrizeType(c *fiber.Ctx) error {
 	}
 
 	type FormData struct {
-		Name         string               `json:"name" binding:"required" validate:"required,regex=^[a-zA-Z0-9\\-_ #@]*$"`
-		CategoryId   int                  `json:"category_id" binding:"required" validate:"required,number"`
-		Value        int                  `json:"value" binding:"required" validate:"required,number"`
-		Elligibility int                  `json:"elligibility" binding:"required" validate:"required,number"`
-		ExpiryDate   string               `json:"expiry_date" binding:"required" validate:"required"`
-		Period       string               `json:"period" binding:"required" validate:"required,oneof=monthly weekly daily"`
-		Distribution string               `json:"distribution" binding:"required" validate:"required,oneof=momo cheque other"`
-		Messages     []model.PrizeMessage `json:"messages" binding:"required" validate:"required"`
+		Name            string               `json:"name" binding:"required" validate:"required,regex=^[a-zA-Z0-9\\-_ #@]*$"`
+		CategoryId      int                  `json:"category_id" binding:"required" validate:"required,number"`
+		Value           int                  `json:"value" binding:"required" validate:"required,number"`
+		Elligibility    int                  `json:"elligibility" binding:"required" validate:"required,number"`
+		ExpiryDate      string               `json:"expiry_date" binding:"required" validate:"required"`
+		Period          string               `json:"period" binding:"required" validate:"required,oneof=monthly weekly daily"`
+		Distribution    string               `json:"distribution" binding:"required" validate:"required,oneof=momo cheque other"`
+		TriggerBySystem bool                 `json:"trigger_by_system" binding:"required" validate:"required,boolean"`
+		Messages        []model.PrizeMessage `json:"messages" binding:"required" validate:"required"`
 	}
 	responseStatus := 200
 	formData := new(FormData)
@@ -412,10 +415,11 @@ func CreatePrizeType(c *fiber.Ctx) error {
 	if errorMessage != nil {
 		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, *errorMessage)
 	}
+	formData.Period = strings.ToUpper(formData.Period)
 	//check if expiry_date is already expired
 	expiryDate, err := time.Parse("02/01/2006", formData.ExpiryDate)
 	if err != nil {
-		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Provide data are not valid")
+		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Provided expiry_date is not valid, please use this format dd/mm/yyyy")
 	}
 	if expiryDate.Before(time.Now()) {
 		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Expiry date is already expired")
@@ -483,7 +487,7 @@ func GetDraws(c *fiber.Ctx) error {
 	}
 	draws := []model.Draw{}
 	rows, err := config.DB.Query(ctx,
-		`select d.id,d.code,d.customer_id,d.created_at,p.id as province_id,p.name as province_name,ds.id as district_id,ds.name as district_name,
+		`select d.id,d.code,d.customer_id,d.created_at,d.status,p.id as province_id,p.name as province_name,ds.id as district_id,ds.name as district_name,
 		c.created_at,pt.name as prize_type_name,pt.id as prize_type_id,pt.value as prize_type_value,c.network_operator,c.locale from draw d
 		inner join customer c on d.customer_id = c.id
 		inner join province p on c.province = p.id
@@ -503,7 +507,7 @@ func GetDraws(c *fiber.Ctx) error {
 		draw := model.Draw{}
 		var prizeTypeName *string
 		var prizeTypeId, prizeTypeValue *int
-		err = rows.Scan(&draw.Id, &draw.Code, &draw.Customer.Id, &draw.CreatedAt, &draw.Customer.Province.Id, &draw.Customer.Province.Name,
+		err = rows.Scan(&draw.Id, &draw.Code, &draw.Customer.Id, &draw.CreatedAt, &draw.Status, &draw.Customer.Province.Id, &draw.Customer.Province.Name,
 			&draw.Customer.District.Id, &draw.Customer.District.Name, &draw.Customer.CreatedAt, &prizeTypeName, &prizeTypeId, &prizeTypeValue,
 			&draw.Customer.NetworkOperator, &draw.Customer.Locale)
 		draw.Customer.Phone = "**********"
@@ -516,58 +520,13 @@ func GetDraws(c *fiber.Ctx) error {
 		if err != nil {
 			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get draw data failed", utils.Logger{
 				LogLevel:    utils.CRITICAL,
-				Message:     "GetEntries: Unable to get draw data, error: " + err.Error(),
+				Message:     "GetDraws: Unable to get draw data, error: " + err.Error(),
 				ServiceName: config.ServiceName,
 			})
 		}
 		draws = append(draws, draw)
 	}
 	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "data": draws})
-}
-func CreateNewDraw(c *fiber.Ctx) error {
-	userPayload, err := utils.SecurePath(c, config.Redis)
-	if err != nil {
-		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
-	}
-	type FormData struct {
-		Name         string `json:"name" binding:"required" validate:"required,regex=^[a-zA-Z0-9\\-_ #@]*$"`
-		CategoryId   int    `json:"category_id" binding:"required" validate:"required,number"`
-		Value        int    `json:"value" binding:"required" validate:"required,number"`
-		Elligibility int    `json:"elligibility" binding:"required" validate:"required,number"`
-	}
-	responseStatus := 200
-	formData := new(FormData)
-	if err := c.BodyParser(formData); err != nil || formData.Name == "" {
-		responseStatus = 400
-		c.SendStatus(responseStatus)
-		return c.JSON(fiber.Map{"status": responseStatus, "message": "Please provide all required data - " + formData.Name, "details": err})
-	}
-	if err := Validate.Struct(formData); err != nil {
-		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Provide data are not valid")
-	}
-	invalidKeys := utils.ValidateStruct(formData, []string{"#", "@"}, []string{})
-	errorMessage := utils.ValidateStructText(invalidKeys)
-	if errorMessage != nil {
-		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, *errorMessage)
-	}
-	_, err = config.DB.Exec(ctx,
-		`insert into prize_type (name,prize_category_id,elligibility,value,status,operator_id) values ($1,$2,$3,$4,'OKAY',$5)`,
-		formData.Name, formData.CategoryId, formData.Elligibility, formData.Value, userPayload.Id)
-	if err != nil {
-		if ok, key := utils.IsErrDuplicate(err); ok {
-			return utils.JsonErrorResponse(c, fiber.StatusConflict, fmt.Sprintf("Unable to save data, %s already exists", key))
-		} else if ok, key := utils.IsForeignKeyErr(err); ok {
-			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, fmt.Sprintf("Unable to save data, %s is invalid", key))
-		}
-		responseStatus = fiber.StatusConflict
-		c.SendStatus(responseStatus)
-		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to save data, system error. please try again later", utils.Logger{
-			LogLevel:    utils.CRITICAL,
-			Message:     fmt.Sprintf("CreatePrizeType: Unable to save data, Name:%s, err:%v", formData.Name, err),
-			ServiceName: config.ServiceName,
-		})
-	}
-	return c.JSON(fiber.Map{"status": responseStatus, "message": "Prize type added successfully"})
 }
 func AddUser(c *fiber.Ctx) error {
 	userPayload, err := utils.SecurePath(c, config.Redis)
@@ -602,10 +561,19 @@ func AddUser(c *fiber.Ctx) error {
 	}
 	n := utils.GenerateRandomNumber(89)
 	avatarUrl := fmt.Sprintf("%s/api/v1/avatar/svg/av/%d", viper.GetString("BACKEND_URL"), n)
-	//insert user data, and will have to set password for the first time with a verification using phone
+	//insert user data, and will have to change password for the first time with a verification using phone
+	rawPassword := utils.RandString(8)
+	password, err := utils.HashPassword(rawPassword)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to save data, system error. please try again later", utils.Logger{
+			LogLevel:    utils.CRITICAL,
+			Message:     fmt.Sprintf("AddUser: Unable to hash password, Name:%s, err:%v", formData.Fname, err),
+			ServiceName: config.ServiceName,
+		})
+	}
 	_, err = config.DB.Exec(ctx,
-		`insert into users (fname,lname, email,phone, department_id, password, can_add_codes, can_trigger_draw, can_view_logs, can_add_user, status, operator, avatar_url) values ($1, $2, $3, $4, $5, '-', $6, $7, $8, $9, 'OKAY', $10, $11)`,
-		formData.Fname, formData.Lname, formData.Email, formData.Phone, formData.Department, formData.CanAddCode, formData.CanTriggerDraw, formData.CanViewLogs, formData.CanAddUser, userPayload.Id, avatarUrl)
+		`insert into users (fname,lname, email,phone, department_id, password, can_add_codes, can_trigger_draw, can_view_logs, can_add_user, status,force_change_password, operator, avatar_url) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'OKAY', true, $11, $12)`,
+		formData.Fname, formData.Lname, formData.Email, formData.Phone, formData.Department, password, formData.CanAddCode, formData.CanTriggerDraw, formData.CanViewLogs, formData.CanAddUser, userPayload.Id, avatarUrl)
 
 	if err != nil {
 		if ok, key := utils.IsErrDuplicate(err); ok {
@@ -621,6 +589,8 @@ func AddUser(c *fiber.Ctx) error {
 			ServiceName: config.ServiceName,
 		})
 	}
+	//send password to user phone (sms)
+	go utils.SendSMS(config.DB, formData.Phone, fmt.Sprintf("Your password is %s, please change it after login\n\n%s", rawPassword, viper.GetString("ap_name")), viper.GetString("SENDER_ID"), config.ServiceName, "password", nil)
 	return c.JSON(fiber.Map{"status": responseStatus, "message": "User added successfully"})
 }
 
@@ -633,7 +603,7 @@ func GetUsers(c *fiber.Ctx) error {
 	//fetch users
 	rows, err := config.DB.Query(ctx,
 		`select u.id,u.fname,u.lname,u.email,u.phone,u.department_id,d.title as department_title, u.email_verified,u.phone_verified,u.avatar_url,u.status,
-			u.can_add_codes,u.can_trigger_draw,u.can_view_logs,u.can_add_user from users u inner join departments d on u.department_id = d.id`)
+			u.can_add_codes,u.can_trigger_draw,u.can_view_logs,u.can_add_user,force_change_password from users u inner join departments d on u.department_id = d.id`)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get users data failed", utils.Logger{
@@ -648,7 +618,7 @@ func GetUsers(c *fiber.Ctx) error {
 		user := model.UserProfile{}
 		//scan user data
 		err = rows.Scan(&user.Id, &user.Fname, &user.Lname, &user.Email, &user.Phone, &user.Department.Id, &user.Department.Title, &user.EmailVerified, &user.PhoneVerified,
-			&user.AvatarUrl, &user.Status, &user.CanAddCodes, &user.CanTriggerDraw, &user.CanViewLogs, &user.CanAddUser)
+			&user.AvatarUrl, &user.Status, &user.CanAddCodes, &user.CanTriggerDraw, &user.CanViewLogs, &user.CanAddUser, &user.ForceChangePassword)
 
 		if err != nil {
 			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get users data failed", utils.Logger{
@@ -787,7 +757,7 @@ func ChangePassword(c *fiber.Ctx) error {
 	} else if err := bcrypt.CompareHashAndPassword([]byte(password), []byte(formData.NewPassword)); err == nil {
 		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "New Password is the same as current one, no action made")
 	}
-	_, err = config.DB.Exec(ctx, "update users set password=crypt($1, gen_salt('bf')) where id=$2", formData.NewPassword, userPayload.Id)
+	_, err = config.DB.Exec(ctx, "update users set password=crypt($1, gen_salt('bf')),force_change_password=false where id=$2", formData.NewPassword, userPayload.Id)
 	if err != nil {
 		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Change password failed", utils.Logger{
 			LogLevel:    utils.CRITICAL,
@@ -871,7 +841,7 @@ func ForgotPassword(c *fiber.Ctx) error {
 		})
 	}
 	//send email containing otp
-	go utils.SendSMS(phone, fmt.Sprintf("Dear %s, %s is the OTP for reseting your password. don't share it with anyone.", fname, otp), viper.GetString("SENDER_ID"), config.ServiceName, "reset_password_otp", nil)
+	go utils.SendSMS(config.DB, phone, fmt.Sprintf("Dear %s, %s is the OTP for reseting your password. don't share it with anyone.", fname, otp), viper.GetString("SENDER_ID"), config.ServiceName, "reset_password_otp", nil)
 	return successResponse
 }
 func ValidateOTP(c *fiber.Ctx) error {
@@ -1017,7 +987,7 @@ func SetNewPassword(c *fiber.Ctx) error {
 		})
 	}
 	//update password
-	_, err = config.DB.Exec(ctx, "update users set password=crypt($1, gen_salt('bf')) where id=$2", formData.Password, resetData["userId"])
+	_, err = config.DB.Exec(ctx, "update users set password=crypt($1, gen_salt('bf')),force_change_password=false where id=$2", formData.Password, resetData["userId"])
 	if err != nil {
 		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Reset password failed", utils.Logger{
 			LogLevel:    utils.CRITICAL,
@@ -1128,4 +1098,206 @@ func SendVerificationEmail(c *fiber.Ctx) error {
 	utils.SendEmail(formData.Email, "Verify your account", body, config.ServiceName)
 	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "You will receive an email contains the OTP for verification, it will be expired in 20 minutes",
 		"reset_key": uniqueResetTokenKey, "email": formData.Email})
+}
+func StartPrizeDraw(c *fiber.Ctx) error {
+	userPayload, err := utils.SecurePath(c, config.Redis)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
+	}
+	type FormData struct {
+		PrizeType uint `json:"prize_type" validate:"required,number"`
+	}
+	formData := new(FormData)
+	if err := c.BodyParser(formData); err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusBadRequest, "Please provide all required data:"+err.Error())
+	}
+	if err := Validate.Struct(formData); err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusBadRequest, "Provided prize type is invalid")
+	}
+	var name, status, period string
+	var id int
+	var value float64
+	var expiryDate *time.Time
+	var triggerBySystem bool
+	err = config.DB.QueryRow(ctx, "select id,name,status,expiry_date,trigger_by_system,period,value from prize_type where id=$1", formData.PrizeType).
+		Scan(&id, &name, &status, &expiryDate, &triggerBySystem, &period, &value)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to start a new draw, system error", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "StartPrizeDraw: Unable to fetch prize type data, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		} else {
+			return utils.JsonErrorResponse(c, fiber.StatusForbidden, "Provided prize type is invalid")
+		}
+	}
+	if status != "OKAY" {
+		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Selected prize type is not active")
+	} else if expiryDate != nil && time.Now().After(*expiryDate) {
+		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Selected prize type is expired")
+	} else if triggerBySystem {
+		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Selected prize can only be triggered by the system")
+	}
+	entryFilter := ""
+	if period == "MONTHLY" {
+		entryFilter = "e.created_at >= now() - interval '1 month'"
+	} else if period == "WEEKLY" {
+		entryFilter = "e.created_at >= now() - interval '1 week'"
+	} else if period == "DAILY" {
+		entryFilter = "e.created_at >= now() - interval '1 day'"
+	}
+	//fetch latest prizes (customerId) for the selected prize type
+	rows, err := config.DB.Query(ctx,
+		`select e.customer_id from prize p INNER JOIN entries e on e.id = p.entry_id where p.prize_type_id=$1 and p.created_at >= now() - interval '1 day'`, formData.PrizeType)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to start a new draw, system error", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "StartPrizeDraw: Unable to fetch latest prize data, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+	}
+	excludeCustomers := []string{}
+	for rows.Next() {
+		var customerId string
+		err = rows.Scan(&customerId)
+		if err != nil {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to start a new draw, system error", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "StartPrizeDraw: Unable to scan latest prize data, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+		excludeCustomers = append(excludeCustomers, customerId)
+	}
+	if len(excludeCustomers) != 0 {
+		if len(entryFilter) != 0 {
+			entryFilter += " and "
+
+		}
+		entryFilter += fmt.Sprintf("e.customer_id not in ('%s')", strings.Join(excludeCustomers, "','"))
+	}
+	finalFilter := ""
+	if len(entryFilter) != 0 {
+		finalFilter = " where " + entryFilter
+	}
+	//get elligible entries
+	entries := []model.Entries{}
+	entryRows, err := config.DB.Query(ctx,
+		`select e.id,e.code_id,e.customer_id,e.created_at from entries e `+finalFilter)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return utils.JsonErrorResponse(c, fiber.StatusExpectationFailed, "No elligible entries found for the selected prize type")
+		}
+		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to start a new draw, system error", utils.Logger{
+			LogLevel:    utils.CRITICAL,
+			Message:     "StartPrizeDraw: Unable to fetch entries data, error: " + err.Error(),
+			ServiceName: config.ServiceName,
+		})
+	}
+	for entryRows.Next() {
+		entry := model.Entries{}
+		err = entryRows.Scan(&entry.Id, &entry.Code.Id, &entry.Customer.Id, &entry.CreatedAt)
+		if err != nil {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to start a new draw, system error", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "StartPrizeDraw: Unable to scan entries, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+		entries = append(entries, entry)
+	}
+	if len(entries) == 0 {
+		return utils.JsonErrorResponse(c, fiber.StatusExpectationFailed, "No elligible entries found for the selected prize type")
+	}
+	//select a random entry
+	randomGen := rand.New(rand.NewSource(time.Now().UnixNano()))
+	selectedEntry := entries[randomGen.Intn(len(entries))]
+	//fetch code
+	var rawCode string
+	err = config.DB.QueryRow(ctx, "select pgp_sym_decrypt(code::bytea,$2) as code from codes where id=$1", selectedEntry.Code.Id, config.EncryptionKey).
+		Scan(&rawCode)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to start a new draw, system error", utils.Logger{
+			LogLevel:    utils.CRITICAL,
+			Message:     "StartPrizeDraw: Unable to get selected code info, error: " + err.Error(),
+			ServiceName: config.ServiceName,
+		})
+	}
+	tx, err := config.DB.Begin(ctx)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to start a new draw, system error", utils.Logger{
+			LogLevel:    utils.CRITICAL,
+			Message:     "StartPrizeDraw: Unable to begin transaction query, error: " + err.Error(),
+			ServiceName: config.ServiceName,
+		})
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback(ctx)
+		} else {
+			tx.Commit(ctx)
+		}
+	}()
+	//insert draw
+	var drawId int
+	err = tx.QueryRow(ctx, "insert into draw (prize_type_id,entry_id,code,customer_id,status,operator_id) values ($1,$2,$3,$4,$5,$6) returning id",
+		formData.PrizeType, selectedEntry.Id, rawCode, selectedEntry.Customer.Id, "confirmed", userPayload.Id).
+		Scan(&drawId)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to start a new draw, system error", utils.Logger{
+			LogLevel:    utils.CRITICAL,
+			Message:     "StartPrizeDraw: Unable to save draw data, error: " + err.Error(),
+			ServiceName: config.ServiceName,
+		})
+	}
+	//insert prize
+	var prizeId int
+	err = tx.QueryRow(ctx, "insert into prize (entry_id,prize_type_id,prize_value,code,draw_id) values ($1,$2,$3,$4,$5) returning id",
+		selectedEntry.Id, formData.PrizeType, value, rawCode, drawId).
+		Scan(&prizeId)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to start a new draw, system error", utils.Logger{
+			LogLevel:    utils.CRITICAL,
+			Message:     "StartPrizeDraw: Unable to save prize data, error: " + err.Error(),
+			ServiceName: config.ServiceName,
+		})
+	}
+	//Send sms to the winner
+	//get customer phone number
+	var customerPhone, customerName, customerLocale string
+	err = config.DB.QueryRow(ctx, "select pgp_sym_decrypt(phone::bytea,$1), pgp_sym_decrypt(names::bytea,$1),locale from customer where id=$2",
+		config.EncryptionKey, selectedEntry.Customer.Id).
+		Scan(&customerPhone, &customerName, &customerLocale)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to start a new draw, system error", utils.Logger{
+			LogLevel:    utils.CRITICAL,
+			Message:     "StartPrizeDraw: Unable to fetch prize type info, error: " + err.Error(),
+			ServiceName: config.ServiceName,
+		})
+	}
+	//get prize message based on customer locale
+	prizeMessage := ""
+	err = config.DB.QueryRow(ctx, "select message from prize_message where prize_type_id=$1 and lang=$2", id, customerLocale).
+		Scan(&prizeMessage)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return utils.JsonErrorResponse(c, fiber.StatusExpectationFailed, "Unable to start a new draw, no prize sms available for the selected prize type")
+		}
+		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to start a new draw, system error", utils.Logger{
+			LogLevel:    utils.CRITICAL,
+			Message:     "StartPrizeDraw: Unable to fetch prize message info, error: " + err.Error(),
+			ServiceName: config.ServiceName,
+		})
+	}
+	//send sms
+	fmt.Println("Sending sms to", customerPhone, "Message:", prizeMessage, "Sender:", viper.GetString("SENDER_ID"), "Service:", config.ServiceName, "Type:", "prize_won", "Customer:", selectedEntry.Customer.Id)
+	go utils.SendSMS(config.DB, customerPhone, prizeMessage, viper.GetString("SENDER_ID"), config.ServiceName, "prize_won", &selectedEntry.Customer.Id)
+	c.SendStatus(200)
+	arrayCode := strings.Split(rawCode, "")
+	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "Draw ended successfully",
+		"winner": fiber.Map{"draw_id": drawId, "prize_id": prizeId, "winner": customerName, "code": arrayCode},
+	})
 }

@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS prize_type (
     period VARCHAR(255) DEFAULT 'MONTHLY',
     expiry_date TIMESTAMP,
     distribution_type VARCHAR(255) DEFAULT 'momo',
+    trigger_by_system BOOLEAN DEFAULT FALSE,
     operator_id INT REFERENCES users(id),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

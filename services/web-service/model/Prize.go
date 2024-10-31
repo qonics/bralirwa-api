@@ -16,12 +16,12 @@ type PrizeMessage struct {
 type PrizeType struct {
 	Id            int            `json:"id"`
 	Name          string         `json:"name"`
-	PrizeCategory PrizeCategory  `json:"prize_category"`
+	PrizeCategory PrizeCategory  `json:"prize_category,omitempty"`
 	Value         int            `json:"value"`
 	Elligibility  int            `json:"elligibility"`
 	Period        string         `json:"period"`
 	Distribution  string         `json:"distribution"`
-	ExpiryDate    time.Time      `json:"expiry_date"`
+	ExpiryDate    *time.Time     `json:"expiry_date"`
 	PrizeMessage  []PrizeMessage `json:"messages"`
 	Status        string         `json:"status"`
 	CreatedAt     time.Time      `json:"created_at"`

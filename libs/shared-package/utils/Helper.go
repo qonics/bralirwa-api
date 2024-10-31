@@ -21,12 +21,12 @@ import (
 	"time"
 	"unicode"
 	"unsafe"
-	"ussd-service/config"
 	"web-service/model"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/go-redis/redis/v8"
 	"github.com/gofiber/fiber/v2"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nicksnyder/go-i18n/v2/i18n"
 	"github.com/spf13/viper"
 	"golang.org/x/crypto/bcrypt"
@@ -452,7 +452,7 @@ func ValidateMTNPhone(phoneNumber string) (string, error) {
 }
 
 // send sms, return message_id on success and error if any
-func SendSMS(phoneNumber string, message string, senderName string, serviceName string, messageType string, customerId *int) (string, error) {
+func SendSMS(DB *pgxpool.Pool, phoneNumber string, message string, senderName string, serviceName string, messageType string, customerId *int) (string, error) {
 	//skip this if it is test
 	if IsTestMode {
 		return "TEST_SMS_ID", nil
@@ -490,8 +490,9 @@ func SendSMS(phoneNumber string, message string, senderName string, serviceName 
 	if res, ok := result["status"].(float64); ok {
 		if res != 200 {
 			error_message = "failed to send sms, err: " + result["message"].(string)
+		} else {
+			messageId = result["message_id"].(string)
 		}
-		messageId = result["message_id"].(string)
 	} else {
 		LogMessage("critical", "SendSMS: failed to send sms, system error, body: "+string(body), serviceName)
 		error_message = "failed to send sms, system error"
@@ -500,8 +501,11 @@ func SendSMS(phoneNumber string, message string, senderName string, serviceName 
 	if error_message != "" {
 		status = "FAILED"
 	}
-	_, err = config.DB.Exec(ctx, "INSERT INTO sms (customer_id, message, type, status, message_id, credit_count, error_message) VALUES ($1, $2, $3, $4, $5, 0, $6)",
-		&customerId, message, messageType, status, messageId, error_message)
+	if messageType == "password" {
+		message = "Message content is hidden for security reasons"
+	}
+	_, err = DB.Exec(ctx, "INSERT INTO sms (customer_id, message, type, status, message_id, credit_count, error_message) VALUES ($1, $2, $3, $4, $5, 0, $6)",
+		customerId, message, messageType, status, messageId, error_message)
 	if err != nil {
 		LogMessage("critical", "SendSMS: failed to save sms, err: "+err.Error(), serviceName)
 	}
