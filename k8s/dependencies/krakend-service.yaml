@@ -12,7 +12,7 @@ spec:
   ports:
     - name: "8090"
       port: 8090
-      targetPort: 8090
+      targetPort: 8091
       nodePort: 30081  # You can choose a port in the range 30000-32767
   selector:
     io.kompose.service: krakend
