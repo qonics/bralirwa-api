@@ -23,6 +23,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/jackc/pgx/v5"
 	"github.com/spf13/viper"
+	"github.com/xuri/excelize/v2"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -117,6 +118,20 @@ func LoginWithEmail(c *fiber.Ctx) error {
 		c.SendStatus(responseStatus)
 		return c.JSON(fiber.Map{"status": responseStatus, "message": "Invalid credentials"})
 	} else if UserProfile.Status == "inactive" {
+		utils.RecordActivityLog(config.DB,
+			utils.ActivityLog{
+				UserID:       UserProfile.Id,
+				ActivityType: "LoginWithEmail",
+				Description:  "Login failed, user account not active",
+				Status:       "failure",
+				IPAddress:    c.IP(),
+				UserAgent:    c.Get("User-Agent"),
+			},
+			config.ServiceName,
+			&map[string]interface{}{
+				"email": userData.Email,
+			},
+		)
 		responseStatus = 403
 		c.SendStatus(responseStatus)
 		return c.JSON(fiber.Map{"status": responseStatus, "message": "Your account has been deactivated"})
@@ -131,6 +146,20 @@ func LoginWithEmail(c *fiber.Ctx) error {
 			ServiceName: config.ServiceName,
 		})
 	}
+	utils.RecordActivityLog(config.DB,
+		utils.ActivityLog{
+			UserID:       UserProfile.Id,
+			ActivityType: "LoginWithEmail",
+			Description:  "successful login",
+			Status:       "success",
+			IPAddress:    c.IP(),
+			UserAgent:    c.Get("User-Agent"),
+		},
+		config.ServiceName,
+		&map[string]interface{}{
+			"email": userData.Email,
+		},
+	)
 	c.SendStatus(responseStatus)
 	return c.JSON(fiber.Map{"status": responseStatus, "message": "Login completed", "data": UserProfile, "accessToken": token})
 }
@@ -312,7 +341,7 @@ func GetPrizes(c *fiber.Ctx) error {
 	prizes := []model.Prize{}
 	rows, err := config.DB.Query(ctx,
 		`select p.id,p.rewarded,p.created_at,p.prize_value,p.prize_type_id,pc.name as category_name,pc.status as category_status,pc.created_at as category_created_at,
-		e.customer_id from prize p
+		e.customer_id,pt.name,pc.id from prize p
 		inner join entries e on p.entry_id = e.id
 		inner join prize_type pt on pt.id = p.prize_type_id
 		inner join prize_category pc on pt.prize_category_id = pc.id`)
@@ -328,7 +357,8 @@ func GetPrizes(c *fiber.Ctx) error {
 	}
 	for rows.Next() {
 		prize := model.Prize{}
-		err = rows.Scan(&prize.Id, &prize.Rewarded, &prize.CreatedAt, &prize.Value, &prize.PrizeType.Id, &prize.PrizeCategory.Name, &prize.PrizeCategory.Status, &prize.PrizeCategory.CreatedAt, &prize.Customer.Id)
+		err = rows.Scan(&prize.Id, &prize.Rewarded, &prize.CreatedAt, &prize.Value, &prize.PrizeType.Id, &prize.PrizeCategory.Name, &prize.PrizeCategory.Status,
+			&prize.PrizeCategory.CreatedAt, &prize.Customer.Id, &prize.PrizeType.Name, &prize.PrizeCategory.Id)
 		prize.Customer.Phone = "**********"
 		prize.Customer.Names = "**********"
 		if err != nil {
@@ -370,8 +400,32 @@ func CreatePrizeCategory(c *fiber.Ctx) error {
 		`insert into prize_category (name,status,operator_id) values ($1,'OKAY',$2)`, formData.Name, userPayload.Id)
 	if err != nil {
 		if ok, key := utils.IsErrDuplicate(err); ok {
+			utils.RecordActivityLog(config.DB,
+				utils.ActivityLog{
+					UserID:       userPayload.Id,
+					ActivityType: "CreatePrizeCategory",
+					Description:  "adding a new prize category: " + formData.Name + " failed, duplicate",
+					Status:       "failure",
+					IPAddress:    c.IP(),
+					UserAgent:    c.Get("User-Agent"),
+				},
+				config.ServiceName,
+				nil,
+			)
 			return utils.JsonErrorResponse(c, fiber.StatusConflict, fmt.Sprintf("Unable to save data, %s already exists", key))
 		}
+		utils.RecordActivityLog(config.DB,
+			utils.ActivityLog{
+				UserID:       userPayload.Id,
+				ActivityType: "CreatePrizeCategory",
+				Description:  "adding a new prize category: " + formData.Name + " failed, duplicate",
+				Status:       "failure",
+				IPAddress:    c.IP(),
+				UserAgent:    c.Get("User-Agent"),
+			},
+			config.ServiceName,
+			nil,
+		)
 		responseStatus = fiber.StatusConflict
 		c.SendStatus(responseStatus)
 		return utils.JsonErrorResponse(c, fiber.StatusConflict, "Unable to save data, system error. please try again later", utils.Logger{
@@ -380,6 +434,18 @@ func CreatePrizeCategory(c *fiber.Ctx) error {
 			ServiceName: config.ServiceName,
 		})
 	}
+	utils.RecordActivityLog(config.DB,
+		utils.ActivityLog{
+			UserID:       userPayload.Id,
+			ActivityType: "CreatePrizeCategory",
+			Description:  "added a new prize category: " + formData.Name,
+			Status:       "success",
+			IPAddress:    c.IP(),
+			UserAgent:    c.Get("User-Agent"),
+		},
+		config.ServiceName,
+		nil,
+	)
 	return c.JSON(fiber.Map{"status": responseStatus, "message": "Prize category added successfully"})
 }
 func CreatePrizeType(c *fiber.Ctx) error {
@@ -478,6 +544,18 @@ func CreatePrizeType(c *fiber.Ctx) error {
 			ServiceName: config.ServiceName,
 		})
 	}
+	utils.RecordActivityLog(config.DB,
+		utils.ActivityLog{
+			UserID:       userPayload.Id,
+			ActivityType: "CreatePrizeType",
+			Description:  "added a new prize type: " + formData.Name,
+			Status:       "success",
+			IPAddress:    c.IP(),
+			UserAgent:    c.Get("User-Agent"),
+		},
+		config.ServiceName,
+		nil,
+	)
 	return c.JSON(fiber.Map{"status": responseStatus, "message": "Prize type added successfully"})
 }
 func GetDraws(c *fiber.Ctx) error {
@@ -536,7 +614,7 @@ func AddUser(c *fiber.Ctx) error {
 	type FormData struct {
 		Fname          string `json:"fname" binding:"required" validate:"required,regex=^[a-zA-Z0-9 ]*$"`
 		Lname          string `json:"lname" binding:"required" validate:"required,regex=^[a-zA-Z0-9 ]*$"`
-		Phone          string `json:"phone" binding:"required" validate:"required,regex=^07[2389]\\d{7}$"`
+		Phone          string `json:"phone" binding:"required" validate:"required,regex=^2507[2389]\\d{7}$"`
 		Email          string `json:"email" binding:"required" validate:"required,email"`
 		Department     int    `json:"department" binding:"required" validate:"required,number"`
 		CanAddCode     bool   `json:"can_add_codes" binding:"required" validate:"boolean"`
@@ -591,6 +669,18 @@ func AddUser(c *fiber.Ctx) error {
 	}
 	//send password to user phone (sms)
 	go utils.SendSMS(config.DB, formData.Phone, fmt.Sprintf("Your password is %s, please change it after login\n\n%s", rawPassword, viper.GetString("ap_name")), viper.GetString("SENDER_ID"), config.ServiceName, "password", nil)
+	utils.RecordActivityLog(config.DB,
+		utils.ActivityLog{
+			UserID:       userPayload.Id,
+			ActivityType: "addUser",
+			Description:  "added a new user, names: " + formData.Fname + " " + formData.Lname + ", phone: " + formData.Phone + ", Email: " + formData.Email,
+			Status:       "success",
+			IPAddress:    c.IP(),
+			UserAgent:    c.Get("User-Agent"),
+		},
+		config.ServiceName,
+		nil,
+	)
 	return c.JSON(fiber.Map{"status": responseStatus, "message": "User added successfully"})
 }
 
@@ -633,7 +723,7 @@ func GetUsers(c *fiber.Ctx) error {
 }
 
 func GetCustomer(c *fiber.Ctx) error {
-	_, err := utils.SecurePath(c, config.Redis)
+	userPayload, err := utils.SecurePath(c, config.Redis)
 	if err != nil {
 		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
 	}
@@ -657,11 +747,25 @@ func GetCustomer(c *fiber.Ctx) error {
 		}
 		return utils.JsonErrorResponse(c, fiber.StatusNotFound, "customer id provided is not valid")
 	}
+	utils.RecordActivityLog(config.DB,
+		utils.ActivityLog{
+			UserID:       userPayload.Id,
+			ActivityType: "viewCustomer",
+			Description:  "View customer data, name: " + customer.Names,
+			Status:       "success",
+			IPAddress:    c.IP(),
+			UserAgent:    c.Get("User-Agent"),
+		},
+		config.ServiceName,
+		&map[string]interface{}{
+			"customer_id": customerId,
+		},
+	)
 	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "data": customer})
 }
 
 func GetEntryData(c *fiber.Ctx) error {
-	_, err := utils.SecurePath(c, config.Redis)
+	userPayload, err := utils.SecurePath(c, config.Redis)
 	if err != nil {
 		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
 	}
@@ -710,6 +814,21 @@ func GetEntryData(c *fiber.Ctx) error {
 			entry.Prize.PrizeType = *entry.Code.PrizeType
 		}
 	}
+	utils.RecordActivityLog(config.DB,
+		utils.ActivityLog{
+			UserID:       userPayload.Id,
+			ActivityType: "viewEntryData",
+			Description:  "View entry data, customer name: " + entry.Customer.Names,
+			Status:       "success",
+			IPAddress:    c.IP(),
+			UserAgent:    c.Get("User-Agent"),
+		},
+		config.ServiceName,
+		&map[string]interface{}{
+			"entry_id":    entry.Id,
+			"customer_id": entry.Customer.Id,
+		},
+	)
 	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "data": entry})
 }
 func ChangePassword(c *fiber.Ctx) error {
@@ -765,6 +884,18 @@ func ChangePassword(c *fiber.Ctx) error {
 			ServiceName: config.ServiceName,
 		})
 	}
+	utils.RecordActivityLog(config.DB,
+		utils.ActivityLog{
+			UserID:       userPayload.Id,
+			ActivityType: "changePassword",
+			Description:  "Self: changed password",
+			Status:       "success",
+			IPAddress:    c.IP(),
+			UserAgent:    c.Get("User-Agent"),
+		},
+		config.ServiceName,
+		nil,
+	)
 	c.SendStatus(200)
 	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": fmt.Sprintf("Dear %s, you password changed successful", userPayload.Fname)})
 }
@@ -787,7 +918,8 @@ func ForgotPassword(c *fiber.Ctx) error {
 	uniqueResetTokenKey := base64.RawStdEncoding.EncodeToString([]byte(formData.Email + utils.RandString(20)))
 	successResponse := c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "You will receive an email if we found an account match with this email",
 		"reset_key": uniqueResetTokenKey, "email": formData.Email})
-	var id, status, fname, lname, phone string
+	var id int
+	var status, fname, lname, phone string
 	err := config.DB.QueryRow(ctx, "select id,status,fname,lname,phone from users where email=$1 limit 1", formData.Email).
 		Scan(&id, &status, &fname, &lname, &phone)
 	if err != nil {
@@ -840,6 +972,18 @@ func ForgotPassword(c *fiber.Ctx) error {
 			ServiceName: config.ServiceName,
 		})
 	}
+	utils.RecordActivityLog(config.DB,
+		utils.ActivityLog{
+			UserID:       id,
+			ActivityType: "forgotPassword",
+			Description:  "Self: Initiated a forgot password",
+			Status:       "success",
+			IPAddress:    c.IP(),
+			UserAgent:    c.Get("User-Agent"),
+		},
+		config.ServiceName,
+		nil,
+	)
 	//send email containing otp
 	go utils.SendSMS(config.DB, phone, fmt.Sprintf("Dear %s, %s is the OTP for reseting your password. don't share it with anyone.", fname, otp), viper.GetString("SENDER_ID"), config.ServiceName, "reset_password_otp", nil)
 	return successResponse
@@ -901,6 +1045,18 @@ func ValidateOTP(c *fiber.Ctx) error {
 				ServiceName: config.ServiceName,
 			})
 		}
+		utils.RecordActivityLog(config.DB,
+			utils.ActivityLog{
+				UserID:       int(otpData["userId"].(float64)),
+				ActivityType: "validateOtp",
+				Description:  "Self: OTP validated",
+				Status:       "success",
+				IPAddress:    c.IP(),
+				UserAgent:    c.Get("User-Agent"),
+			},
+			config.ServiceName,
+			nil,
+		)
 		return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "Phone is verified",
 			"email": otpData["email"], "phone": otpData["phone"], "user_id": otpData["userId"]})
 	}
@@ -1004,6 +1160,18 @@ func SetNewPassword(c *fiber.Ctx) error {
 			ServiceName: config.ServiceName,
 		})
 	}
+	utils.RecordActivityLog(config.DB,
+		utils.ActivityLog{
+			UserID:       int(resetData["userId"].(float64)),
+			ActivityType: "setNewPassword",
+			Description:  "Self: Set new password",
+			Status:       "success",
+			IPAddress:    c.IP(),
+			UserAgent:    c.Get("User-Agent"),
+		},
+		config.ServiceName,
+		nil,
+	)
 	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "Password reset completed", "email": resetData["email"]})
 }
 func SendVerificationEmail(c *fiber.Ctx) error {
@@ -1018,7 +1186,8 @@ func SendVerificationEmail(c *fiber.Ctx) error {
 		return utils.JsonErrorResponse(c, fiber.StatusBadRequest, "Please provide all required data")
 	}
 	uniqueResetTokenKey := base64.RawStdEncoding.EncodeToString([]byte(formData.Email + utils.RandString(20)))
-	var id, status, fname, phone, lname string
+	var id int
+	var status, fname, phone, lname string
 	var email_verified bool
 	err := config.DB.QueryRow(ctx, "select id,status,email_verified,phone,fname,lname from users where email=$1 limit 1", formData.Email).
 		Scan(&id, &status, &email_verified, &phone, &fname, &lname)
@@ -1094,6 +1263,18 @@ func SendVerificationEmail(c *fiber.Ctx) error {
 			ServiceName: config.ServiceName,
 		})
 	}
+	utils.RecordActivityLog(config.DB,
+		utils.ActivityLog{
+			UserID:       id,
+			ActivityType: "setNewPassword",
+			Description:  "Self: Set new password",
+			Status:       "success",
+			IPAddress:    c.IP(),
+			UserAgent:    c.Get("User-Agent"),
+		},
+		config.ServiceName,
+		nil,
+	)
 	//send email containing otp
 	utils.SendEmail(formData.Email, "Verify your account", body, config.ServiceName)
 	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "You will receive an email contains the OTP for verification, it will be expired in 20 minutes",
@@ -1292,12 +1473,467 @@ func StartPrizeDraw(c *fiber.Ctx) error {
 			ServiceName: config.ServiceName,
 		})
 	}
+	utils.RecordActivityLog(config.DB,
+		utils.ActivityLog{
+			UserID:       userPayload.Id,
+			ActivityType: "startPrizeDraw",
+			Description:  "Started a new draw, winner: " + customerName + ", code: " + rawCode,
+			Status:       "success",
+			IPAddress:    c.IP(),
+			UserAgent:    c.Get("User-Agent"),
+		},
+		config.ServiceName,
+		&map[string]interface{}{
+			"draw_id":     drawId,
+			"prize_id":    prizeId,
+			"customer_id": selectedEntry.Customer.Id,
+		},
+	)
 	//send sms
-	fmt.Println("Sending sms to", customerPhone, "Message:", prizeMessage, "Sender:", viper.GetString("SENDER_ID"), "Service:", config.ServiceName, "Type:", "prize_won", "Customer:", selectedEntry.Customer.Id)
 	go utils.SendSMS(config.DB, customerPhone, prizeMessage, viper.GetString("SENDER_ID"), config.ServiceName, "prize_won", &selectedEntry.Customer.Id)
 	c.SendStatus(200)
 	arrayCode := strings.Split(rawCode, "")
 	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "Draw ended successfully",
 		"winner": fiber.Map{"draw_id": drawId, "prize_id": prizeId, "winner": customerName, "code": arrayCode},
 	})
+}
+
+func GetDistributionType(c *fiber.Ctx) error {
+	_, err := utils.SecurePath(c, config.Redis)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
+	}
+	types := strings.Split(viper.GetString("DISTRIBUTION_TYPES"), ",")
+	distributions := []map[string]string{}
+	for _, t := range types {
+		distributions = append(distributions, map[string]string{"name": t, "id": t})
+	}
+	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "data": distributions})
+}
+func GetDepartments(c *fiber.Ctx) error {
+	_, err := utils.SecurePath(c, config.Redis)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
+	}
+	departments := []model.Department{}
+	rows, err := config.DB.Query(ctx,
+		`select id,title,created_at from departments`)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get department data failed", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "GetDepartments: Unable to get department data, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+		return utils.JsonErrorResponse(c, fiber.StatusForbidden, "department data is not valid")
+	}
+	for rows.Next() {
+		department := model.Department{}
+		err = rows.Scan(&department.Id, &department.Title, &department.CreatedAt)
+		if err != nil {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get department data failed", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "GetDepartments: Unable to get department data, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+		departments = append(departments, department)
+	}
+	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "data": departments})
+}
+func GetSMSSent(c *fiber.Ctx) error {
+	_, err := utils.SecurePath(c, config.Redis)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
+	}
+	type SmsData struct {
+		Id           string    `json:"id"`
+		Message      string    `json:"message"`
+		MessageType  string    `json:"message_type"`
+		Phone        *string   `json:"phone"`
+		Status       string    `json:"status"`
+		ErrorMessage string    `json:"error_message"`
+		CreatedAt    time.Time `json:"created_at"`
+	}
+
+	smsData := []SmsData{}
+	rows, err := config.DB.Query(ctx,
+		`select message_id,message,phone,type,status,error_message,created_at from sms`)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get sms data failed", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "GetSMSSent: Unable to get sms data, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+		return utils.JsonErrorResponse(c, fiber.StatusForbidden, "sms data is not valid")
+	}
+	for rows.Next() {
+		sms := SmsData{}
+		err = rows.Scan(&sms.Id, &sms.Message, &sms.Phone, &sms.MessageType, &sms.Status, &sms.ErrorMessage, &sms.CreatedAt)
+		if err != nil {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get sms data failed", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "GetSMSSent: Unable to get sms data, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+		smsData = append(smsData, sms)
+	}
+	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "data": smsData})
+}
+func GetPrizeOverview(c *fiber.Ctx) error {
+	_, err := utils.SecurePath(c, config.Redis)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
+	}
+	type PrizeOverview struct {
+		TotalPrize      float64 `json:"total_prize"`
+		PrizeCount      int     `json:"prize_count"`
+		TotalEligibilty float64 `json:"total_elligibility"`
+		PrizeType       string  `json:"prize_type"`
+	}
+	startDateStr := c.Query("start_date")
+	endDateStr := c.Query("end_date")
+	dateFilter := ""
+	args := []interface{}{}
+	var startDate time.Time
+	if len(startDateStr) != 0 {
+		startDate, err = time.Parse("2006-01-02", startDateStr)
+		if err != nil {
+			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Invalid start date provided")
+		}
+		dateFilter += "p.created_at >= $1"
+		args = append(args, startDateStr)
+	}
+	if len(endDateStr) != 0 {
+		endDate, err := time.Parse("2006-01-02", endDateStr)
+		//check if end date is after start date
+		if len(startDateStr) != 0 {
+			if endDate.Before(startDate) {
+				return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "End date should be after start date")
+			}
+		}
+		//add one day to include the end date
+		endDate = endDate.AddDate(0, 0, 1)
+		if err != nil {
+			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Invalid end date provided")
+		}
+		argName := "$1"
+		if len(dateFilter) != 0 {
+			dateFilter += " and "
+			argName = "$2"
+		}
+		args = append(args, endDate)
+		dateFilter += "p.created_at <= " + argName
+	}
+	if len(dateFilter) != 0 {
+		dateFilter = " where " + dateFilter
+	}
+	prizeOverviews := []PrizeOverview{}
+	query := fmt.Sprintf(`select sum(p.prize_value),count(p.id),sum(pt.elligibility),pt.name from prize p
+	INNER JOIN prize_type pt ON pt.id=p.prize_type_id %s group by p.prize_type_id,pt.id`, dateFilter)
+	fmt.Println("Query:", query)
+	rows, err := config.DB.Query(ctx, query, args...)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get prizeOverview data failed", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "GetPrizeOverview: Unable to get prizeOverview data, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+		return utils.JsonErrorResponse(c, fiber.StatusForbidden, "prizeOverview data is not valid")
+	}
+	for rows.Next() {
+		prizeOverview := PrizeOverview{}
+		err = rows.Scan(&prizeOverview.TotalPrize, &prizeOverview.PrizeCount, &prizeOverview.TotalEligibilty, &prizeOverview.PrizeType)
+		if err != nil {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get prizeOverview data failed", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "GetPrizeOverview: Unable to get prizeOverview data, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+		prizeOverviews = append(prizeOverviews, prizeOverview)
+	}
+	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "prize_overview": prizeOverviews})
+}
+
+func GetCodeOverview(c *fiber.Ctx) error {
+	_, err := utils.SecurePath(c, config.Redis)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
+	}
+	type CodeOverview struct {
+		TotalCode  int `json:"totalCode"`
+		UsedCode   int `json:"usedCode"`
+		RemainCode int `json:"remainCode"`
+	}
+	codeOverview := CodeOverview{}
+	err = config.DB.QueryRow(ctx, `SELECT count(id) as total,
+    count(id) FILTER (WHERE status = 'used') as used_count,
+    count(id) FILTER (WHERE status = 'unused') as pending_count FROM codes;`).Scan(&codeOverview.TotalCode, &codeOverview.UsedCode, &codeOverview.RemainCode)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get codeOverview data failed", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "GetCodeOverview: Unable to get codeOverview data, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+		codeOverview = CodeOverview{
+			TotalCode:  0,
+			UsedCode:   0,
+			RemainCode: 0,
+		}
+	}
+	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "data": codeOverview})
+}
+
+// function to upload excel file and insert into codes table after validation, and use transaction to rollback if any error occurs
+func UploadCodes(c *fiber.Ctx) error {
+	userPayload, err := utils.SecurePath(c, config.Redis)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
+	}
+	//TODO: check if user has right to upload code
+	file, err := c.FormFile("file")
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusBadRequest, "Please provide a valid file")
+	}
+	if file.Size > 1024*1024*50 {
+		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "File size should not exceed 50MB")
+	}
+	//save file
+	fileName := fmt.Sprintf("/app/uploads/%s", file.Filename)
+	err = c.SaveFile(file, fileName)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to save file", utils.Logger{
+			LogLevel:    utils.CRITICAL,
+			Message:     "UploadCodes: Unable to save file, error: " + err.Error(),
+			ServiceName: config.ServiceName,
+		})
+	}
+	//open file
+	xlFile, err := excelize.OpenFile(fileName)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to open file", utils.Logger{
+			LogLevel:    utils.CRITICAL,
+			Message:     "UploadCodes: Unable to open file, error: " + err.Error(),
+			ServiceName: config.ServiceName,
+		})
+	}
+	rows, err := xlFile.GetRows("Sheet1")
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to read file", utils.Logger{
+			LogLevel:    utils.CRITICAL,
+			Message:     "UploadCodes: Unable to read file, error: " + err.Error(),
+			ServiceName: config.ServiceName,
+		})
+	}
+	//validate file data
+	var codes []model.Code
+	for i, row := range rows {
+		if i == 0 {
+			continue
+		}
+		if len(row) != 1 {
+			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Invalid file format, each row should contain only one code")
+		}
+		codes = append(codes, model.Code{Code: row[0]})
+	}
+	//insert codes
+	tx, err := config.DB.Begin(ctx)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to start transaction", utils.Logger{
+			LogLevel:    utils.CRITICAL,
+			Message:     "UploadCodes: Unable to start transaction, error: " + err.Error(),
+			ServiceName: config.ServiceName,
+		})
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback(ctx)
+		} else {
+			tx.Commit(ctx)
+		}
+	}()
+	// Prepare the values and placeholders
+	valueStrings := make([]string, 0, len(codes))
+	valueArgs := make([]interface{}, 0, len(codes)*3)
+
+	for _, code := range codes {
+		if len(code.Code) != 10 {
+			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Invalid code length, code should be 10 digits")
+		} else if utils.ValidateString(code.Code, "") {
+			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Invalid code format, code should contain only digits and letter")
+		}
+		valueStrings = append(valueStrings, fmt.Sprintf("(pgp_sym_encrypt($%d, $%d), digest($%d, 'sha256'), 'unused')",
+			len(valueArgs)+1,
+			len(valueArgs)+2,
+			len(valueArgs)+1))
+
+		valueArgs = append(valueArgs, code.Code, config.EncryptionKey)
+	}
+	// Construct the full SQL query
+	query := fmt.Sprintf("INSERT INTO codes (code, code_hash, status) VALUES %s",
+		strings.Join(valueStrings, ", "))
+
+	// Execute the multi-value insert
+	cmdTag, err := tx.Exec(context.Background(), query, valueArgs...)
+	if err != nil {
+		if ok, _ := utils.IsErrDuplicate(err); ok {
+			return utils.JsonErrorResponse(c, fiber.StatusConflict, "Some codes already exist")
+		}
+		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to insert codes", utils.Logger{
+			LogLevel:    utils.CRITICAL,
+			Message:     "UploadCodes: Unable to insert codes, error: " + err.Error(),
+			ServiceName: config.ServiceName,
+		})
+	}
+	utils.RecordActivityLog(config.DB,
+		utils.ActivityLog{
+			UserID:       userPayload.Id,
+			ActivityType: "uploadCodes",
+			Description:  "Upload codes, total: " + fmt.Sprintf("%v", cmdTag.RowsAffected()),
+			Status:       "success",
+			IPAddress:    c.IP(),
+			UserAgent:    c.Get("User-Agent"),
+		},
+		config.ServiceName,
+		nil,
+	)
+	//remove file
+	go os.Remove(fileName)
+	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": fmt.Sprintf("%v Codes uploaded successfully", len(codes)), "count": cmdTag.RowsAffected()})
+}
+func GetLogs(c *fiber.Ctx) error {
+	_, err := utils.SecurePath(c, config.Redis)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
+	}
+	startDateStr := c.Query("start_date")
+	endDateStr := c.Query("end_date")
+	userId := c.Query("user_id")
+	query := c.Query("query")
+	//add pagination
+	page := c.QueryInt("page", 1)
+	limit := c.QueryInt("limit", 20)
+	if page < 1 {
+		page = 1
+	}
+	offSet := (page - 1) * limit
+	logsFilter := ""
+	args := []interface{}{}
+	var startDate time.Time
+	a := 0
+	if len(startDateStr) != 0 {
+		startDate, err = time.Parse("2006-01-02", startDateStr)
+		if err != nil {
+			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Invalid start date provided")
+		}
+		a++
+		logsFilter += "l.created_at >= " + fmt.Sprintf("$%d", a)
+		args = append(args, startDateStr)
+	}
+	if len(endDateStr) != 0 {
+		endDate, err := time.Parse("2006-01-02", endDateStr)
+		//check if end date is after start date
+		if len(startDateStr) != 0 {
+			if endDate.Before(startDate) {
+				return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "End date should be after start date")
+			}
+		}
+		//add one day to include the end date
+		endDate = endDate.AddDate(0, 0, 1)
+		if err != nil {
+			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Invalid end date provided")
+		}
+		if len(logsFilter) != 0 {
+			logsFilter += " and "
+			a++
+		}
+		args = append(args, endDate)
+		logsFilter += "l.created_at <= " + fmt.Sprintf("$%d", a)
+	}
+	if len(userId) != 0 {
+		//check if user id is valid integer
+		_, err := strconv.Atoi(userId)
+		if err != nil {
+			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Invalid user id provided")
+		}
+		if len(logsFilter) != 0 {
+			logsFilter += " and "
+			a++
+		}
+		args = append(args, userId)
+		logsFilter += "l.user_id = " + fmt.Sprintf("$%d", a)
+	}
+	if len(query) != 0 {
+		//check if user id is valid integer
+		if utils.ValidateString(query, "") {
+			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Query contains invalid characters")
+		}
+		if len(logsFilter) != 0 {
+			logsFilter += " and "
+			a++
+		}
+		args = append(args, query)
+		logsFilter += "l.description ilike " + fmt.Sprintf("$%d", a)
+	}
+	if len(logsFilter) != 0 {
+		logsFilter = " where " + logsFilter
+	}
+	limitStr := fmt.Sprintf(" limit $%d offset $%d", a+1, a+2)
+	globalArgs := args
+	args = append(args, limit, offSet)
+	logs := []utils.ActivityLog{}
+	fmt.Println(`select l.user_id,l.activity_type,l.status,l.description,l.ip_address::text,l.user_agent,l.created_at,u.fname,u.lname,u.email,u.phone from activity_logs l ` + logsFilter +
+		` inner join users u on u.id = l.user_id order by l.created_at desc` + limitStr)
+	fmt.Println(args)
+	rows, err := config.DB.Query(ctx,
+		`select l.user_id,l.activity_type,l.status,l.description,l.ip_address::text,l.user_agent,l.created_at,u.fname,u.lname,u.email,u.phone from activity_logs l `+logsFilter+
+			` inner join users u on u.id = l.user_id order by l.created_at desc`+limitStr, args...)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get activity logs data failed", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "GetLogs: Unable to get sms data, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+		return utils.JsonErrorResponse(c, fiber.StatusForbidden, "activity logs data is not valid")
+	}
+	for rows.Next() {
+		log := utils.ActivityLog{}
+		err = rows.Scan(&log.UserID, &log.ActivityType, &log.Status, &log.Description, &log.IPAddress, &log.UserAgent, &log.CreatedAt,
+			&log.User.Fname, &log.User.Lname, &log.User.Email, &log.User.Phone)
+		if err != nil {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get activity logs data failed", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "GetLogs: Unable to get activity logs data, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+		logs = append(logs, log)
+	}
+	//get total logs for pagination
+	//get total logs for pagination
+	totalLogs := 0
+	err = config.DB.QueryRow(ctx,
+		`select count(id) from activity_logs l `+logsFilter, globalArgs...).Scan(&totalLogs)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get activity logs data failed", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "GetLogs: Unable to get total logs data, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+	}
+	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "data": logs,
+		"pagination": fiber.Map{"page": page, "limit": limit, "total": totalLogs}})
 }

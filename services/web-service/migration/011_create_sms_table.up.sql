@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS sms (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-
+-- phone was added later (in 015_alter_sms_table.sql)
 -- Index for fast lookup on phone, type, and customer_id
 CREATE INDEX idx_sms_type ON sms(type);
 CREATE INDEX idx_sms_customer_id ON sms(customer_id);

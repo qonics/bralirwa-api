@@ -504,8 +504,8 @@ func SendSMS(DB *pgxpool.Pool, phoneNumber string, message string, senderName st
 	if messageType == "password" {
 		message = "Message content is hidden for security reasons"
 	}
-	_, err = DB.Exec(ctx, "INSERT INTO sms (customer_id, message, type, status, message_id, credit_count, error_message) VALUES ($1, $2, $3, $4, $5, 0, $6)",
-		customerId, message, messageType, status, messageId, error_message)
+	_, err = DB.Exec(ctx, "INSERT INTO sms (customer_id, message, phone, type, status, message_id, credit_count, error_message) VALUES ($1, $2, $3, $4, $5, $6, 0, $7)",
+		customerId, message, phoneNumber, messageType, status, messageId, error_message)
 	if err != nil {
 		LogMessage("critical", "SendSMS: failed to save sms, err: "+err.Error(), serviceName)
 	}
@@ -606,4 +606,36 @@ func SendEmail(to string, subject string, body string, serviceName string) strin
 	}
 	//TODO: send email
 	return "Email sent"
+}
+
+// RecordActivityLog inserts an activity log into the activity_logs table
+func RecordActivityLog(db *pgxpool.Pool, log ActivityLog, serviceName string, extra *map[string]interface{}) error {
+	query := `
+    INSERT INTO activity_logs (user_id, activity_type, status, description, ip_address, user_agent, extra, created_at, updated_at)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    `
+	extraData, err := json.Marshal(extra)
+	if err != nil {
+		return fmt.Errorf("could not marshal extra data: %w", err)
+	}
+	_, err = db.Exec(
+		ctx,
+		query,
+		log.UserID,
+		log.ActivityType,
+		log.Status,
+		log.Description,
+		log.IPAddress,
+		log.UserAgent,
+		extraData,
+		time.Now(),
+		time.Now(),
+	)
+
+	if err != nil {
+		LogMessage("critical", "RecordActivityLog: could not insert activity log: "+err.Error(), serviceName)
+		return fmt.Errorf("could not insert activity log: %w", err)
+	}
+
+	return nil
 }

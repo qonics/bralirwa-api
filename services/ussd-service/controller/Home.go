@@ -687,6 +687,10 @@ func entrySaveCode(args ...interface{}) string {
 		utils.LogMessage("error", "entrySaveCode: insert entry failed: err:"+err.Error(), "ussd-service")
 		return "err:system_error"
 	}
+	//TODO: instant prize
+	//get daily prize type
+	sms_message := utils.Localize(localizer, "register_sms", nil)
+	go utils.SendSMS(config.DB, args[3].(string), sms_message, viper.GetString("SENDER_ID"), config.ServiceName, "registration", USSDdata.CustomerId)
 	return ""
 }
 func end_session(args ...interface{}) string {

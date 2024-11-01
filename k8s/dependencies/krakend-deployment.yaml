@@ -24,7 +24,7 @@ spec:
         - image: devopsfaith/krakend
           name: krakend
           ports:
-            - containerPort: 8090
+            - containerPort: 8091
               protocol: TCP
           imagePullPolicy: Never
           securityContext:
@@ -39,7 +39,7 @@ spec:
                 - NET_BIND_SERVICE
           env:
           - name: KRAKEND_PORT
-            value: "8090"
+            value: "8091"
           volumeMounts:
             - name: krakend-config-volume
               mountPath: /etc/krakend

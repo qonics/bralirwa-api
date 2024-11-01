@@ -668,7 +668,7 @@ func TestAddUser(t *testing.T) {
 	app.Post("/user", AddUser)
 	uniqueName := fmt.Sprintf("User %d", time.Now().Unix())
 	uniqueEmail := fmt.Sprintf("user%d@example.com", time.Now().Unix())
-	uniquePhone := fmt.Sprintf("078%s", fmt.Sprintf("%d", time.Now().Unix())[3:])
+	uniquePhone := fmt.Sprintf("25078%s", fmt.Sprintf("%d", time.Now().Unix())[3:])
 	// Test cases
 	tests := []struct {
 		description  string
@@ -701,7 +701,7 @@ func TestAddUser(t *testing.T) {
 				"fname":            "Test",
 				"lname":            uniqueName,
 				"email":            uniqueEmail,
-				"phone":            "0782394234",
+				"phone":            "250782394234",
 				"department":       1,
 				"can_add_codes":    true,
 				"can_trigger_draw": true,
@@ -739,7 +739,7 @@ func TestAddUser(t *testing.T) {
 				"fname":            "Test*sda",
 				"lname":            "asd",
 				"email":            "erfsad@asdfd.com",
-				"phone":            "0788888121",
+				"phone":            "250788888121",
 				"department":       1,
 				"can_add_codes":    true,
 				"can_trigger_draw": true,
@@ -754,7 +754,7 @@ func TestAddUser(t *testing.T) {
 				"fname":            "Test*sda",
 				"lname":            "asd",
 				"email":            "erfsad@asdfd.com",
-				"phone":            "0788888121",
+				"phone":            "250788888121",
 				"department":       -1,
 				"can_add_codes":    true,
 				"can_trigger_draw": true,

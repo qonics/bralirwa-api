@@ -1,0 +1,1 @@
+ALTER TABLE sms add column phone VARCHAR(50);
