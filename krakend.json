@@ -29,14 +29,7 @@
         "HEAD",
         "POST"
       ],
-      "allow_credentials": false,
-      "allow_headers": [
-        "Access-Control-Allow-Headers",
-        "Authorization",
-        "X-Requested-With",
-        "x-csrf-token",
-        "Content-Type"
-      ]
+      "allow_credentials": false
     },
     "security/bot-detector": {
       "empty_user_agent_is_bot": true,
@@ -71,6 +64,12 @@
       "endpoint": "/ws",
       "method": "GET",
       "output_encoding": "no-op",
+      "input_headers": [
+        "User-Agent",
+        "Accept",
+        "X-Forwarded-For",
+        "X-Forwarded-Host"
+      ],
       "backend": [
         {
           "url_pattern": "/ws",
@@ -97,10 +96,7 @@
           "host": [
             "http://ussd-service:9000"
           ],
-          "disable_host_sanitize": false,
-          "input_query_strings": [
-            "*"
-          ]
+          "disable_host_sanitize": false
         }
       ],
       "input_query_strings": [
@@ -130,6 +126,12 @@
     },
     {
       "endpoint": "/api/v1/login",
+      "input_headers": [
+        "Access-Control-Allow-Headers",
+        "Content-Type",
+        "User-Agent",
+        "Accept"
+      ],
       "method": "POST",
       "output_encoding": "no-op",
       "backend": [
@@ -179,7 +181,10 @@
         }
       ],
       "input_headers": [
-        "Authorization","Content-Type","User-Agent","Host"
+        "Authorization",
+        "Content-Type",
+        "User-Agent",
+        "Host"
       ]
     },
     {
@@ -199,7 +204,10 @@
         }
       ],
       "input_headers": [
-        "Authorization","Content-Type","User-Agent","Host"
+        "Authorization",
+        "Content-Type",
+        "User-Agent",
+        "Host"
       ]
     },
     {
@@ -219,7 +227,10 @@
         }
       ],
       "input_headers": [
-        "Authorization","Content-Type","User-Agent","Host"
+        "Authorization",
+        "Content-Type",
+        "User-Agent",
+        "Host"
       ]
     },
     {
@@ -239,7 +250,10 @@
         }
       ],
       "input_headers": [
-          "Authorization","Content-Type","User-Agent","Host"
+        "Authorization",
+        "Content-Type",
+        "User-Agent",
+        "Host"
       ]
     },
     {
@@ -259,7 +273,10 @@
         }
       ],
       "input_headers": [
-        "Authorization","Content-Type","User-Agent","Host"
+        "Authorization",
+        "Content-Type",
+        "User-Agent",
+        "Host"
       ]
     },
     {
@@ -279,7 +296,10 @@
         }
       ],
       "input_headers": [
-        "Authorization","Content-Type","User-Agent","Host"
+        "Authorization",
+        "Content-Type",
+        "User-Agent",
+        "Host"
       ]
     },
     {
@@ -299,7 +319,10 @@
         }
       ],
       "input_headers": [
-          "Authorization","Content-Type","User-Agent","Host"
+        "Authorization",
+        "Content-Type",
+        "User-Agent",
+        "Host"
       ]
     },
     {
@@ -319,7 +342,10 @@
         }
       ],
       "input_headers": [
-          "Authorization","Content-Type","User-Agent","Host"
+        "Authorization",
+        "Content-Type",
+        "User-Agent",
+        "Host"
       ]
     },
     {
@@ -339,7 +365,10 @@
         }
       ],
       "input_headers": [
-          "Authorization","Content-Type","User-Agent","Host"
+        "Authorization",
+        "Content-Type",
+        "User-Agent",
+        "Host"
       ]
     },
     {
@@ -359,7 +388,10 @@
         }
       ],
       "input_headers": [
-          "Authorization","Content-Type","User-Agent","Host"
+        "Authorization",
+        "Content-Type",
+        "User-Agent",
+        "Host"
       ]
     },
     {
@@ -379,7 +411,10 @@
         }
       ],
       "input_headers": [
-          "Authorization","Content-Type","User-Agent","Host"
+        "Authorization",
+        "Content-Type",
+        "User-Agent",
+        "Host"
       ]
     },
     {
@@ -399,7 +434,10 @@
         }
       ],
       "input_headers": [
-        "Authorization","Content-Type","User-Agent","Host"
+        "Authorization",
+        "Content-Type",
+        "User-Agent",
+        "Host"
       ]
     },
     {
@@ -407,7 +445,10 @@
       "method": "POST",
       "output_encoding": "no-op",
       "input_headers": [
-        "Authorization","Content-Type","User-Agent","Host"
+        "Authorization",
+        "Content-Type",
+        "User-Agent",
+        "Host"
       ],
       "backend": [
         {
@@ -438,7 +479,10 @@
         }
       ],
       "input_headers": [
-          "Authorization","Content-Type","User-Agent","Host"
+        "Authorization",
+        "Content-Type",
+        "User-Agent",
+        "Host"
       ]
     },
     {
@@ -458,7 +502,10 @@
         }
       ],
       "input_headers": [
-          "Authorization","Content-Type","User-Agent","Host"
+        "Authorization",
+        "Content-Type",
+        "User-Agent",
+        "Host"
       ]
     },
     {
@@ -478,7 +525,10 @@
         }
       ],
       "input_headers": [
-          "Authorization","Content-Type","User-Agent","Host"
+        "Authorization",
+        "Content-Type",
+        "User-Agent",
+        "Host"
       ]
     },
     {
@@ -498,7 +548,10 @@
         }
       ],
       "input_headers": [
-          "Authorization","Content-Type","User-Agent","Host"
+        "Authorization",
+        "Content-Type",
+        "User-Agent",
+        "Host"
       ]
     },
     {
@@ -518,7 +571,10 @@
         }
       ],
       "input_headers": [
-          "Authorization","Content-Type","User-Agent","Host"
+        "Authorization",
+        "Content-Type",
+        "User-Agent",
+        "Host"
       ]
     },
     {
@@ -538,7 +594,10 @@
         }
       ],
       "input_headers": [
-          "Authorization","Content-Type","User-Agent","Host"
+        "Authorization",
+        "Content-Type",
+        "User-Agent",
+        "Host"
       ]
     },
     {
@@ -558,7 +617,10 @@
         }
       ],
       "input_headers": [
-          "Authorization","Content-Type","User-Agent","Host"
+        "Authorization",
+        "Content-Type",
+        "User-Agent",
+        "Host"
       ]
     },
     {
@@ -578,7 +640,10 @@
         }
       ],
       "input_headers": [
-          "Authorization","Content-Type","User-Agent","Host"
+        "Authorization",
+        "Content-Type",
+        "User-Agent",
+        "Host"
       ]
     },
     {
@@ -598,7 +663,10 @@
         }
       ],
       "input_headers": [
-          "Authorization","Content-Type","User-Agent","Host"
+        "Authorization",
+        "Content-Type",
+        "User-Agent",
+        "Host"
       ]
     },
     {
@@ -618,7 +686,156 @@
         }
       ],
       "input_headers": [
-          "Authorization","Content-Type","User-Agent","Host"
+        "Authorization",
+        "Content-Type",
+        "User-Agent",
+        "Host"
+      ]
+    },
+    {
+      "endpoint": "/api/v1/departments",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/api/v1/departments",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "GET",
+          "host": [
+            "http://web-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ],
+      "input_headers": [
+        "Authorization",
+        "Content-Type",
+        "User-Agent",
+        "Host"
+      ]
+    },
+    {
+      "endpoint": "/api/v1/sms_sent",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/api/v1/sms_sent",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "GET",
+          "host": [
+            "http://web-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ],
+      "input_headers": [
+        "Authorization",
+        "Content-Type",
+        "User-Agent",
+        "Host"
+      ]
+    },
+    {
+      "endpoint": "/api/v1/distribution-type",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/api/v1/distribution-type",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "GET",
+          "host": [
+            "http://web-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ],
+      "input_headers": [
+        "Authorization",
+        "Content-Type",
+        "User-Agent",
+        "Host"
+      ]
+    },
+    {
+      "endpoint": "/api/v1/prize_overview",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/api/v1/prize_overview",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "GET",
+          "host": [
+            "http://web-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ],
+      "input_query_strings": [
+        "start_date",
+        "end_date"
+      ],
+      "input_headers": [
+        "Authorization",
+        "Content-Type",
+        "User-Agent",
+        "Host"
+      ]
+    },
+    {
+      "endpoint": "/api/v1/code-overview",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/api/v1/code-overview",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "GET",
+          "host": [
+            "http://web-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ],
+      "input_headers": [
+        "Authorization",
+        "Content-Type",
+        "User-Agent",
+        "Host"
+      ]
+    },
+    {
+      "endpoint": "/api/v1/logs",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/api/v1/logs",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "GET",
+          "host": [
+            "http://web-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ],
+      "input_query_strings": [
+        "start_date",
+        "end_date"
+      ],
+      "input_headers": [
+        "Authorization",
+        "Content-Type",
+        "User-Agent",
+        "Host"
       ]
     }
   ]

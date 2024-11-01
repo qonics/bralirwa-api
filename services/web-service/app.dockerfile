@@ -1,6 +1,7 @@
 FROM alpine:latest
 
 RUN mkdir /app
+RUN mkdir /app/uploads
 
 COPY app-release /app
 COPY templates /app/templates

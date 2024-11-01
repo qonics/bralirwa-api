@@ -4,9 +4,9 @@ import "time"
 
 type PrizeCategory struct {
 	Id        int       `json:"id"`
-	Name      string    `json:"name"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"created_at"`
+	Name      string    `json:"name,omitempty"`
+	Status    string    `json:"status,omitempty"`
+	CreatedAt time.Time `json:"created_at,omitempty"`
 	UpdatedAt time.Time `json:"-"`
 }
 type PrizeMessage struct {
@@ -15,16 +15,16 @@ type PrizeMessage struct {
 }
 type PrizeType struct {
 	Id            int            `json:"id"`
-	Name          string         `json:"name"`
+	Name          string         `json:"name,omitempty"`
 	PrizeCategory PrizeCategory  `json:"prize_category,omitempty"`
-	Value         int            `json:"value"`
-	Elligibility  int            `json:"elligibility"`
-	Period        string         `json:"period"`
-	Distribution  string         `json:"distribution"`
-	ExpiryDate    *time.Time     `json:"expiry_date"`
-	PrizeMessage  []PrizeMessage `json:"messages"`
-	Status        string         `json:"status"`
-	CreatedAt     time.Time      `json:"created_at"`
+	Value         int            `json:"value,omitempty"`
+	Elligibility  int            `json:"elligibility,omitempty"`
+	Period        string         `json:"period,omitempty"`
+	Distribution  string         `json:"distribution,omitempty"`
+	ExpiryDate    *time.Time     `json:"expiry_date,omitempty"`
+	PrizeMessage  []PrizeMessage `json:"messages,omitempty"`
+	Status        string         `json:"status,omitempty"`
+	CreatedAt     time.Time      `json:"created_at,omitempty"`
 	UpdatedAt     time.Time      `json:"-"`
 }
 
