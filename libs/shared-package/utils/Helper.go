@@ -363,10 +363,6 @@ func IsErrDuplicate(err error) (bool, string) {
 		switch key {
 		case "prize_category_name_key":
 			keyName = "Category name"
-		case "unique_code_prize":
-			keyName = "code and prize type"
-		case "unique_customer_prize":
-			keyName = "customer and prize type"
 		case "users_phone_key":
 			keyName = "phone"
 		case "users_email_key":
@@ -638,4 +634,43 @@ func RecordActivityLog(db *pgxpool.Pool, log ActivityLog, serviceName string, ex
 	}
 
 	return nil
+}
+
+// getOdds returns the probability of getting true based on the hour of the day.
+func getOdds(hour int) int {
+	switch {
+	case hour >= 0 && hour < 7:
+		return 30
+	case hour >= 7 && hour < 12:
+		return 40
+	case hour >= 12 && hour < 16:
+		return 50
+	case hour >= 16 && hour < 22:
+		return 60
+	default:
+		return 50
+	}
+}
+
+// getOdds returns the probability of getting true based on the hour of the day.
+func GetOdds(hour int) int {
+	switch {
+	case hour >= 0 && hour < 7:
+		return 30
+	case hour >= 7 && hour < 12:
+		return 40
+	case hour >= 12 && hour < 16:
+		return 50
+	case hour >= 16 && hour < 22:
+		return 60
+	default:
+		return 50
+	}
+}
+
+// generateBoolWithOdds returns true or false based on the odds determined by the current time.
+func GenerateBoolWithOdds(rng *mathRand.Rand) bool {
+	currentTime := time.Now()
+	odds := getOdds(currentTime.Hour())
+	return rng.Intn(100) < odds
 }
