@@ -14,18 +14,19 @@ type PrizeMessage struct {
 	Message string `json:"message" binding:"required" validate:"required,min=10,max=255"`
 }
 type PrizeType struct {
-	Id            int            `json:"id"`
-	Name          string         `json:"name,omitempty"`
-	PrizeCategory PrizeCategory  `json:"prize_category,omitempty"`
-	Value         int            `json:"value,omitempty"`
-	Elligibility  int            `json:"elligibility,omitempty"`
-	Period        string         `json:"period,omitempty"`
-	Distribution  string         `json:"distribution,omitempty"`
-	ExpiryDate    *time.Time     `json:"expiry_date,omitempty"`
-	PrizeMessage  []PrizeMessage `json:"messages,omitempty"`
-	Status        string         `json:"status,omitempty"`
-	CreatedAt     time.Time      `json:"created_at,omitempty"`
-	UpdatedAt     time.Time      `json:"-"`
+	Id              int            `json:"id"`
+	Name            string         `json:"name,omitempty"`
+	PrizeCategory   PrizeCategory  `json:"prize_category,omitempty"`
+	Value           int            `json:"value,omitempty"`
+	Elligibility    int            `json:"elligibility,omitempty"`
+	Period          string         `json:"period,omitempty"`
+	Distribution    string         `json:"distribution,omitempty"`
+	ExpiryDate      *time.Time     `json:"expiry_date,omitempty"`
+	PrizeMessage    []PrizeMessage `json:"messages,omitempty"`
+	TriggerBySystem bool           `json:"trigger_by_system"`
+	Status          string         `json:"status,omitempty"`
+	CreatedAt       time.Time      `json:"created_at,omitempty"`
+	UpdatedAt       time.Time      `json:"-"`
 }
 
 type Prize struct {
