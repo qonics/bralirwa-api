@@ -507,9 +507,10 @@ func CreatePrizeType(c *fiber.Ctx) error {
 	}()
 	var prizeTypeId int
 	err = tx.QueryRow(ctx,
-		`insert into prize_type (name,prize_category_id,elligibility,value,status,operator_id,expiry_date,distribution_type,period)
-		values ($1,$2,$3,$4,'OKAY',$5, $6, $7, $8)  returning id`,
-		formData.Name, formData.CategoryId, formData.Elligibility, formData.Value, userPayload.Id, expiryDate, formData.Distribution, formData.Period).
+		`insert into prize_type (name,prize_category_id,elligibility,value,status,operator_id,expiry_date,distribution_type,period,trigger_by_system)
+		values ($1,$2,$3,$4,'OKAY',$5, $6, $7, $8, $9)  returning id`,
+		formData.Name, formData.CategoryId, formData.Elligibility, formData.Value, userPayload.Id, expiryDate, formData.Distribution, formData.Period,
+		formData.TriggerBySystem).
 		Scan(&prizeTypeId)
 	if err != nil {
 		if ok, key := utils.IsErrDuplicate(err); ok {
@@ -1295,13 +1296,13 @@ func StartPrizeDraw(c *fiber.Ctx) error {
 	if err := Validate.Struct(formData); err != nil {
 		return utils.JsonErrorResponse(c, fiber.StatusBadRequest, "Provided prize type is invalid")
 	}
-	var name, status, period string
+	var name, status, period, distributionType string
 	var id int
 	var value float64
 	var expiryDate *time.Time
 	var triggerBySystem bool
-	err = config.DB.QueryRow(ctx, "select id,name,status,expiry_date,trigger_by_system,period,value from prize_type where id=$1", formData.PrizeType).
-		Scan(&id, &name, &status, &expiryDate, &triggerBySystem, &period, &value)
+	err = config.DB.QueryRow(ctx, "select id,name,status,expiry_date,trigger_by_system,period,value,distribution_type from prize_type where id=$1", formData.PrizeType).
+		Scan(&id, &name, &status, &expiryDate, &triggerBySystem, &period, &value, &distributionType)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to start a new draw, system error", utils.Logger{
@@ -1396,6 +1397,32 @@ func StartPrizeDraw(c *fiber.Ctx) error {
 	//select a random entry
 	randomGen := rand.New(rand.NewSource(time.Now().UnixNano()))
 	selectedEntry := entries[randomGen.Intn(len(entries))]
+	//get customer data
+	var customerPhone, customerName, customerLocale, mno string
+	err = config.DB.QueryRow(ctx, "select pgp_sym_decrypt(phone::bytea,$1), pgp_sym_decrypt(names::bytea,$1),locale,network_operator from customer where id=$2",
+		config.EncryptionKey, selectedEntry.Customer.Id).
+		Scan(&customerPhone, &customerName, &customerLocale, &mno)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to start a new draw, system error", utils.Logger{
+			LogLevel:    utils.CRITICAL,
+			Message:     "StartPrizeDraw: Unable to fetch customer info, error: " + err.Error(),
+			ServiceName: config.ServiceName,
+		})
+	}
+	//get prize message based on customer locale
+	prizeMessage := ""
+	err = config.DB.QueryRow(ctx, "select message from prize_message where prize_type_id=$1 and lang=$2", id, customerLocale).
+		Scan(&prizeMessage)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return utils.JsonErrorResponse(c, fiber.StatusExpectationFailed, "Unable to start a new draw, no prize sms available for the selected prize type")
+		}
+		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to start a new draw, system error", utils.Logger{
+			LogLevel:    utils.CRITICAL,
+			Message:     "StartPrizeDraw: Unable to fetch prize message info, error: " + err.Error(),
+			ServiceName: config.ServiceName,
+		})
+	}
 	//fetch code
 	var rawCode string
 	err = config.DB.QueryRow(ctx, "select pgp_sym_decrypt(code::bytea,$2) as code from codes where id=$1", selectedEntry.Code.Id, config.EncryptionKey).
@@ -1418,8 +1445,6 @@ func StartPrizeDraw(c *fiber.Ctx) error {
 	defer func() {
 		if err != nil {
 			tx.Rollback(ctx)
-		} else {
-			tx.Commit(ctx)
 		}
 	}()
 	//insert draw
@@ -1428,6 +1453,12 @@ func StartPrizeDraw(c *fiber.Ctx) error {
 		formData.PrizeType, selectedEntry.Id, rawCode, selectedEntry.Customer.Id, "confirmed", userPayload.Id).
 		Scan(&drawId)
 	if err != nil {
+		if ok, keyy := utils.IsErrDuplicate(err); ok {
+			if keyy == "unique_customer_prize" {
+				return utils.JsonErrorResponse(c, fiber.StatusExpectationFailed, "Unable to confirm the draw, The same customer has already won a prize")
+			}
+			return utils.JsonErrorResponse(c, fiber.StatusExpectationFailed, "The selected entry has already won a prize")
+		}
 		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to start a new draw, system error", utils.Logger{
 			LogLevel:    utils.CRITICAL,
 			Message:     "StartPrizeDraw: Unable to save draw data, error: " + err.Error(),
@@ -1446,32 +1477,14 @@ func StartPrizeDraw(c *fiber.Ctx) error {
 			ServiceName: config.ServiceName,
 		})
 	}
-	//Send sms to the winner
-	//get customer phone number
-	var customerPhone, customerName, customerLocale string
-	err = config.DB.QueryRow(ctx, "select pgp_sym_decrypt(phone::bytea,$1), pgp_sym_decrypt(names::bytea,$1),locale from customer where id=$2",
-		config.EncryptionKey, selectedEntry.Customer.Id).
-		Scan(&customerPhone, &customerName, &customerLocale)
-	if err != nil {
-		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to start a new draw, system error", utils.Logger{
-			LogLevel:    utils.CRITICAL,
-			Message:     "StartPrizeDraw: Unable to fetch prize type info, error: " + err.Error(),
-			ServiceName: config.ServiceName,
-		})
-	}
-	//get prize message based on customer locale
-	prizeMessage := ""
-	err = config.DB.QueryRow(ctx, "select message from prize_message where prize_type_id=$1 and lang=$2", id, customerLocale).
-		Scan(&prizeMessage)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return utils.JsonErrorResponse(c, fiber.StatusExpectationFailed, "Unable to start a new draw, no prize sms available for the selected prize type")
+	tx.Commit(ctx)
+	//distribute prize
+	if distributionType == "momo" {
+		_, err = config.DB.Exec(ctx, `insert into transaction (prize_id, amount, phone, mno, customer_id, transaction_type, initiated_by,status) values ($1, $2, $3, $4, $5,'DEBIT','SYSTEM','PENDING')`,
+			prizeId, value, customerPhone, mno, selectedEntry.Customer.Id)
+		if err != nil {
+			utils.LogMessage("error", "entrySaveCode: #distribute_prize insert transaction failed: err:"+err.Error(), "ussd-service")
 		}
-		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to start a new draw, system error", utils.Logger{
-			LogLevel:    utils.CRITICAL,
-			Message:     "StartPrizeDraw: Unable to fetch prize message info, error: " + err.Error(),
-			ServiceName: config.ServiceName,
-		})
 	}
 	utils.RecordActivityLog(config.DB,
 		utils.ActivityLog{
@@ -1936,4 +1949,23 @@ func GetLogs(c *fiber.Ctx) error {
 	}
 	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "data": logs,
 		"pagination": fiber.Map{"page": page, "limit": limit, "total": totalLogs}})
+}
+
+// TODO: implement loop to distribute prize to users
+func DistributeMomoPrize() {
+	//fetch pending transaction
+	rows, err := config.DB.Query(ctx, `SELECT id,amount,phone,mno,trx_id,transaction_type FROM momo_transactions WHERE status = 'PENDING' LIMIT 1000;`)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			utils.LogMessage(string(utils.CRITICAL), "DistributeMomoPrize: Unable to fetch pending momo transactions, error: "+err.Error(), config.ServiceName)
+		}
+	}
+	for rows.Next() {
+		transaction := model.Transactions{}
+		err = rows.Scan(&transaction.Id, &transaction.Amount, &transaction.Phone, &transaction.Mno, &transaction.TrxId, &transaction.TransactionType)
+		if err != nil {
+			utils.LogMessage(string(utils.CRITICAL), "DistributeMomoPrize: Unable to scan pending momo transactions, error: "+err.Error(), config.ServiceName)
+		}
+		//TODO: send prize to user based on MNO
+	}
 }

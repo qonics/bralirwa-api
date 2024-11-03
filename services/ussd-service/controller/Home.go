@@ -14,6 +14,8 @@ import (
 	"ussd-service/config"
 	"ussd-service/model"
 
+	"math/rand"
+
 	"github.com/BurntSushi/toml"
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
@@ -505,7 +507,7 @@ func preRegisterSaveCode(args ...interface{}) string {
 	}
 	extra, _ := getUssdDataItem(sessionId, "extra")
 	extraData := extra.(map[string]interface{})
-	appendExtraData(sessionId, extraData, "code", *input)
+	appendExtraData(sessionId, extraData, "code", strings.ToUpper(*input))
 	appendExtraData(sessionId, extraData, "code_id", fmt.Sprintf("%v", codeId))
 	return ""
 }
@@ -627,8 +629,9 @@ func completeRegistration(args ...interface{}) string {
 		utils.LogMessage("error", "completeRegistration: insert customer failed: err:"+err.Error(), "ussd-service")
 		return "err:system_error"
 	}
+	var entryId int
 	//create entry record
-	_, err = config.DB.Exec(ctx, `insert into entries (customer_id,code_id) values ($1,$2)`, customerId, extraData["code_id"])
+	err = config.DB.QueryRow(ctx, `insert into entries (customer_id,code_id) values ($1,$2) returning id`, customerId, extraData["code_id"]).Scan(&entryId)
 	if err != nil {
 		//delete customer
 		removeCustomer(customerId)
@@ -645,10 +648,12 @@ func completeRegistration(args ...interface{}) string {
 		utils.LogMessage("error", "completeRegistration: insert entry failed: err:"+err.Error(), "ussd-service")
 		return "err:system_error"
 	}
-	//TODO: instant prize
-	//get daily prize type
-	sms_message := utils.Localize(localizer, "register_sms", nil)
-	go utils.SendSMS(config.DB, args[3].(string), sms_message, viper.GetString("SENDER_ID"), config.ServiceName, "registration", &customerId)
+	USSDdata.CustomerId = &customerId
+	sms_message, message_type, _, err := dailyPrizeWinning(entryId, extraData["code"].(string), args[1].(string))
+	if err != nil {
+		return err.Error()
+	}
+	go utils.SendSMS(config.DB, args[3].(string), sms_message, viper.GetString("SENDER_ID"), config.ServiceName, message_type, &customerId)
 	return "success_entry"
 }
 func removeCustomer(customerId int) {
@@ -658,10 +663,10 @@ func removeCustomer(customerId int) {
 	}
 }
 func entrySaveCode(args ...interface{}) string {
-	input := args[2].(*string)
+	code := strings.ToUpper(*args[2].(*string))
 	var codeId int
 	var status string
-	err := config.DB.QueryRow(ctx, `select id,status from codes where code_hash = digest($1,'sha256')`, input).Scan(&codeId, &status)
+	err := config.DB.QueryRow(ctx, `select id,status from codes where code_hash = digest($1,'sha256')`, code).Scan(&codeId, &status)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "fail:invalid_code"
@@ -672,8 +677,9 @@ func entrySaveCode(args ...interface{}) string {
 	if status != "unused" {
 		return "fail:inactive_code"
 	}
+	var entryId int
 	//create entry record
-	_, err = config.DB.Exec(ctx, `insert into entries (customer_id,code_id) values ($1,$2)`, USSDdata.CustomerId, codeId)
+	err = config.DB.QueryRow(ctx, `insert into entries (customer_id,code_id) values ($1,$2) returning id`, USSDdata.CustomerId, codeId).Scan(&entryId)
 	if err != nil {
 		//delete customerY
 		utils.LogMessage("error", "entrySaveCode: insert entries failed: err:"+err.Error(), "ussd-service")
@@ -687,12 +693,85 @@ func entrySaveCode(args ...interface{}) string {
 		utils.LogMessage("error", "entrySaveCode: insert entry failed: err:"+err.Error(), "ussd-service")
 		return "err:system_error"
 	}
-	//TODO: instant prize
-	//get daily prize type
-	sms_message := utils.Localize(localizer, "register_sms", nil)
-	go utils.SendSMS(config.DB, args[3].(string), sms_message, viper.GetString("SENDER_ID"), config.ServiceName, "registration", USSDdata.CustomerId)
+	sms_message, message_type, _, err := dailyPrizeWinning(entryId, code, args[1].(string))
+	if err != nil {
+		return err.Error()
+	}
+	go utils.SendSMS(config.DB, args[3].(string), sms_message, viper.GetString("SENDER_ID"), config.ServiceName, message_type, USSDdata.CustomerId)
 	return ""
 }
 func end_session(args ...interface{}) string {
 	return "success_entry"
+}
+
+func dailyPrizeWinning(entryId int, code string, lang string) (string, string, bool, error) {
+	// Create a new rand instance with a secure seed
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	result := utils.GenerateBoolWithOdds(rng)
+	var prizeType struct {
+		Id             int
+		Name           string
+		RemainingPlace int
+		Value          int
+		Status         string
+		DistrutionType string
+		Message        string
+	}
+	var isPrizeWon bool
+	var prizeId int
+	if result {
+		//try to get daily prize and check if there is a remaining room (based on elligibility and distributed prizes)
+		//get daily prize typey
+		err := config.DB.QueryRow(ctx, `select pt.id, pt.name,(pt.elligibility - count(p.id)) as remaining_place,pt.value,pt.status,pt.distribution_type from prize_type pt
+		LEFT JOIN prize p on p.prize_type_id = pt.id where pt.period = 'DAILY' and pt.trigger_by_system = true and pt.status='OKAY' group by pt.id, p.prize_type_id order by random() limit 1`).
+			Scan(&prizeType.Id, &prizeType.Name, &prizeType.RemainingPlace, &prizeType.Value, &prizeType.Status, &prizeType.DistrutionType)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				isPrizeWon = false
+			}
+			utils.LogMessage("error", "entrySaveCode: fetch daily prize failed: err:"+err.Error(), "ussd-service")
+			return "", "", false, errors.New("err:system_error")
+		}
+		if prizeType.RemainingPlace > 0 {
+			//fetch prize_message
+			err = config.DB.QueryRow(ctx, `select message from prize_message where prize_type_id = $1 and lang = $2`, prizeType.Id, lang).Scan(&prizeType.Message)
+			if err != nil {
+				utils.LogMessage("error", "entrySaveCode: fetch prize message failed: err:"+err.Error(), "ussd-service")
+				return "", "", false, errors.New("err:system_error")
+			}
+			//create prize record
+			err = config.DB.QueryRow(ctx, `insert into prize (entry_id, prize_type_id, prize_value,code,rewarded) values ($1, $2, $3,$4, false) returning id`,
+				entryId, prizeType.Id, prizeType.Value, code).Scan(&prizeId)
+			if err != nil {
+				utils.LogMessage("error", "entrySaveCode: insert prize failed: err:"+err.Error(), "ussd-service")
+				return "", "", false, errors.New("err:system_error")
+			}
+			isPrizeWon = true
+		}
+
+	}
+	var sms_message, message_type string
+	if isPrizeWon {
+		sms_message = prizeType.Message
+		message_type = "prize"
+		if prizeType.DistrutionType == "momo" {
+			//fetch	customer phone and network operator
+			var mno string
+			err := config.DB.QueryRow(ctx, `select network_operator from customer where id = $1`,
+				USSDdata.CustomerId).Scan(&mno)
+			if err != nil {
+				utils.LogMessage("error", "entrySaveCode: #distribute_prize fetch customer MNO failed: err:"+err.Error(), "ussd-service")
+			} else {
+				_, err = config.DB.Exec(ctx, `insert into transaction (prize_id, amount, phone, mno, customer_id, transaction_type, initiated_by,status) values ($1, $2, $3, $4, $5,'DEBIT','SYSTEM','PENDING')`,
+					prizeId, prizeType.Value, USSDdata.MSISDN, mno, USSDdata.CustomerId)
+				if err != nil {
+					utils.LogMessage("error", "entrySaveCode: #distribute_prize insert transaction failed: err:"+err.Error(), "ussd-service")
+				}
+			}
+		}
+	} else {
+		sms_message = utils.Localize(localizer, "register_sms", nil)
+		message_type = "no_prize"
+	}
+	return sms_message, message_type, isPrizeWon, nil
 }
