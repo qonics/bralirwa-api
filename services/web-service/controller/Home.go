@@ -244,11 +244,11 @@ func GetPrizeType(c *fiber.Ctx) error {
 	if prizeCategory == "" {
 		rows, err = config.DB.Query(ctx,
 			`select p.id,p.name,p.status,p.value,p.elligibility,pc.name as category_name,pc.id as category_id,pc.status as category_status,pc.created_at,p.created_at,
-			p.period,p.distribution_type,p.expiry_date,STRING_AGG(pm.lang, ', ') as langs,STRING_AGG(pm.message, ', ') as messages from prize_type p join prize_category pc on p.prize_category_id = pc.id join prize_message pm on pm.prize_type_id=p.id group by p.id,pc.id`)
+			p.period,p.distribution_type,p.expiry_date,STRING_AGG(pm.lang, ', ') as langs,STRING_AGG(pm.message, ', ') as messages,trigger_by_system from prize_type p join prize_category pc on p.prize_category_id = pc.id join prize_message pm on pm.prize_type_id=p.id group by p.id,pc.id`)
 	} else {
 		rows, err = config.DB.Query(ctx,
 			`select p.id,p.name,p.status,p.value,p.elligibility,pc.name as category_name,pc.id as category_id,pc.status as category_status,pc.created_at,p.created_at,
-			p.period,p.distribution_type,p.expiry_date,STRING_AGG(pm.lang, ', ') as langs,STRING_AGG(pm.message, ', ') as messages from prize_type p join prize_category pc on p.prize_category_id = pc.id join prize_message pm on pm.prize_type_id=p.id where p.prize_category_id=$1 group by p.id,pc.id`, prizeCategory)
+			p.period,p.distribution_type,p.expiry_date,STRING_AGG(pm.lang, ', ') as langs,STRING_AGG(pm.message, ', ') as messages,trigger_by_system from prize_type p join prize_category pc on p.prize_category_id = pc.id join prize_message pm on pm.prize_type_id=p.id where p.prize_category_id=$1 group by p.id,pc.id`, prizeCategory)
 	}
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
@@ -264,7 +264,8 @@ func GetPrizeType(c *fiber.Ctx) error {
 		var langs, messages string
 		prize := model.PrizeType{}
 		err = rows.Scan(&prize.Id, &prize.Name, &prize.Status, &prize.Value, &prize.Elligibility, &prize.PrizeCategory.Name,
-			&prize.PrizeCategory.Id, &prize.PrizeCategory.Status, &prize.PrizeCategory.CreatedAt, &prize.CreatedAt, &prize.Period, &prize.Distribution, &prize.ExpiryDate, &langs, &messages)
+			&prize.PrizeCategory.Id, &prize.PrizeCategory.Status, &prize.PrizeCategory.CreatedAt, &prize.CreatedAt, &prize.Period,
+			&prize.Distribution, &prize.ExpiryDate, &langs, &messages, &prize.TriggerBySystem)
 		//extract messages and langs and populate to []prize.Message
 		prize.PrizeMessage = []model.PrizeMessage{}
 		for i, lang := range strings.Split(langs, ", ") {
@@ -455,12 +456,13 @@ func CreatePrizeType(c *fiber.Ctx) error {
 	}
 
 	type FormData struct {
+		Id              int                  `json:"id" binding:"required" validate:"number"`
 		Name            string               `json:"name" binding:"required" validate:"required,regex=^[a-zA-Z0-9\\-_ #@]*$"`
-		CategoryId      int                  `json:"category_id" binding:"required" validate:"required,number"`
+		CategoryId      int                  `json:"prize_category" binding:"required" validate:"required,number"`
 		Value           int                  `json:"value" binding:"required" validate:"required,number"`
 		Elligibility    int                  `json:"elligibility" binding:"required" validate:"required,number"`
-		ExpiryDate      string               `json:"expiry_date" binding:"required" validate:"required"`
-		Period          string               `json:"period" binding:"required" validate:"required,oneof=monthly weekly daily"`
+		ExpiryDate      time.Time            `json:"expiry_date" binding:"required" validate:"required"`
+		Period          string               `json:"period" binding:"required" validate:"required,oneof=MONTHLY WEEKLY DAILY GRAND"`
 		Distribution    string               `json:"distribution" binding:"required" validate:"required,oneof=momo cheque other"`
 		TriggerBySystem bool                 `json:"trigger_by_system" binding:"required" validate:"required,boolean"`
 		Messages        []model.PrizeMessage `json:"messages" binding:"required" validate:"required"`
@@ -483,11 +485,11 @@ func CreatePrizeType(c *fiber.Ctx) error {
 	}
 	formData.Period = strings.ToUpper(formData.Period)
 	//check if expiry_date is already expired
-	expiryDate, err := time.Parse("02/01/2006", formData.ExpiryDate)
-	if err != nil {
-		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Provided expiry_date is not valid, please use this format dd/mm/yyyy")
-	}
-	if expiryDate.Before(time.Now()) {
+	// expiryDate, err := time.Parse("02/01/2006", formData.ExpiryDate)
+	// if err != nil {
+	// 	return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Provided expiry_date is not valid, please use this format dd/mm/yyyy")
+	// }
+	if formData.ExpiryDate.Before(time.Now()) {
 		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Expiry date is already expired")
 	}
 	tx, err := config.DB.Begin(ctx)
@@ -506,30 +508,69 @@ func CreatePrizeType(c *fiber.Ctx) error {
 		}
 	}()
 	var prizeTypeId int
-	err = tx.QueryRow(ctx,
-		`insert into prize_type (name,prize_category_id,elligibility,value,status,operator_id,expiry_date,distribution_type,period,trigger_by_system)
-		values ($1,$2,$3,$4,'OKAY',$5, $6, $7, $8, $9)  returning id`,
-		formData.Name, formData.CategoryId, formData.Elligibility, formData.Value, userPayload.Id, expiryDate, formData.Distribution, formData.Period,
-		formData.TriggerBySystem).
-		Scan(&prizeTypeId)
-	if err != nil {
-		if ok, key := utils.IsErrDuplicate(err); ok {
-			return utils.JsonErrorResponse(c, fiber.StatusConflict, fmt.Sprintf("Unable to save data, %s already exists", key))
-		} else if ok, key := utils.IsForeignKeyErr(err); ok {
-			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, fmt.Sprintf("Unable to save data, %s is invalid", key))
+	var oldName, oldValue, oldElligibility, oldPeriod string
+	var oldExpiry time.Time
+	actionType := "Create"
+	//check if formdata id is valid
+	if formData.Id != 0 {
+		actionType = "Update"
+		if err = tx.QueryRow(ctx,
+			`select id,name,value,elligibility,expiry_date,period from prize_type where id = $1`, formData.Id).
+			Scan(&prizeTypeId, &oldName, &oldValue, &oldElligibility, &oldExpiry, &oldPeriod); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return utils.JsonErrorResponse(c, fiber.StatusConflict, "Provided id is not valid")
+			} else {
+				return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to save data, system error. please try again later", utils.Logger{
+					LogLevel:    utils.CRITICAL,
+					Message:     fmt.Sprintf("CreatePrizeType: Unable to check id, Name:%s, err:%v", formData.Name, err),
+					ServiceName: config.ServiceName,
+				})
+			}
 		}
-		responseStatus = fiber.StatusConflict
-		c.SendStatus(responseStatus)
-		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to save data, system error. please try again later", utils.Logger{
-			LogLevel:    utils.CRITICAL,
-			Message:     fmt.Sprintf("CreatePrizeType: Unable to save data, Name:%s, err:%v", formData.Name, err),
-			ServiceName: config.ServiceName,
-		})
+		//update prize type
+		_, err = tx.Exec(ctx,
+			`update prize_type set name=$1,prize_category_id=$2,elligibility=$3,value=$4,status='OKAY',operator_id=$5,expiry_date=$6,distribution_type=$7,period=$8,trigger_by_system=$9 where id=$10`,
+			formData.Name, formData.CategoryId, formData.Elligibility, formData.Value, userPayload.Id, formData.ExpiryDate, formData.Distribution, formData.Period,
+			formData.TriggerBySystem, formData.Id)
+		if err != nil {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to save data, system error. please try again later", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     fmt.Sprintf("CreatePrizeType: Unable to update data, Name:%s, err:%v", formData.Name, err),
+				ServiceName: config.ServiceName,
+			})
+		}
+	} else {
+		err = tx.QueryRow(ctx,
+			`insert into prize_type (name,prize_category_id,elligibility,value,status,operator_id,expiry_date,distribution_type,period,trigger_by_system)
+		values ($1,$2,$3,$4,'OKAY',$5, $6, $7, $8, $9)  returning id`,
+			formData.Name, formData.CategoryId, formData.Elligibility, formData.Value, userPayload.Id, formData.ExpiryDate, formData.Distribution, formData.Period,
+			formData.TriggerBySystem).
+			Scan(&prizeTypeId)
+		if err != nil {
+			if ok, key := utils.IsErrDuplicate(err); ok {
+				return utils.JsonErrorResponse(c, fiber.StatusConflict, fmt.Sprintf("Unable to save data, %s already exists", key))
+			} else if ok, key := utils.IsForeignKeyErr(err); ok {
+				return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, fmt.Sprintf("Unable to save data, %s is invalid", key))
+			}
+			responseStatus = fiber.StatusConflict
+			c.SendStatus(responseStatus)
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to save data, system error. please try again later", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     fmt.Sprintf("CreatePrizeType: Unable to save data, Name:%s, err:%v", formData.Name, err),
+				ServiceName: config.ServiceName,
+			})
+		}
 	}
 	//save message
 	for _, message := range formData.Messages {
+		//change to insert or update
 		_, err = tx.Exec(ctx,
-			`insert into prize_message (lang, prize_type_id, message, operator_id) values ($1, $2, $3, $4)`, message.Lang, prizeTypeId, message.Message, userPayload.Id)
+			`insert into prize_message (lang, prize_type_id, message, operator_id)
+			values ($1, $2, $3, $4)
+			on conflict (lang, prize_type_id) do update
+			set message = $3,
+				operator_id = $4`,
+			message.Lang, prizeTypeId, message.Message, userPayload.Id)
 		if err != nil {
 			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to save data, system error. please try again later", utils.Logger{
 				LogLevel:    utils.CRITICAL,
@@ -545,19 +586,41 @@ func CreatePrizeType(c *fiber.Ctx) error {
 			ServiceName: config.ServiceName,
 		})
 	}
+	logMessage := "added a new prize type: " + formData.Name
+	returnMessage := "Prize type added successfully"
+	if actionType == "Update" {
+		returnMessage = oldName + " updated successfully"
+		if oldName != formData.Name {
+			logMessage += " (old name: " + oldName + ")"
+		}
+		if oldValue != fmt.Sprint(formData.Value) {
+			logMessage += " (old value: " + oldValue + ")"
+		}
+		if oldElligibility != fmt.Sprint(formData.Elligibility) {
+			logMessage += " (old elligibility: " + oldElligibility + ")"
+		}
+		if oldExpiry != formData.ExpiryDate {
+			logMessage += " (old expiry date: " + oldExpiry.Format("02/01/2006") + ")"
+		}
+		if oldPeriod != formData.Period {
+			logMessage += " (old period: " + oldPeriod + ")"
+		}
+	}
 	utils.RecordActivityLog(config.DB,
 		utils.ActivityLog{
 			UserID:       userPayload.Id,
-			ActivityType: "CreatePrizeType",
-			Description:  "added a new prize type: " + formData.Name,
+			ActivityType: actionType + "PrizeType",
+			Description:  logMessage,
 			Status:       "success",
 			IPAddress:    c.IP(),
 			UserAgent:    c.Get("User-Agent"),
 		},
 		config.ServiceName,
-		nil,
+		&map[string]interface{}{
+			"id": prizeTypeId,
+		},
 	)
-	return c.JSON(fiber.Map{"status": responseStatus, "message": "Prize type added successfully"})
+	return c.JSON(fiber.Map{"status": responseStatus, "message": returnMessage})
 }
 func GetDraws(c *fiber.Ctx) error {
 	_, err := utils.SecurePath(c, config.Redis)
