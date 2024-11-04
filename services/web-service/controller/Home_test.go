@@ -1419,3 +1419,90 @@ func TestStartPrizeDraw(t *testing.T) {
 		}
 	}
 }
+
+func TestChangeUserStatus(t *testing.T) {
+	token := createTestAccessToken()
+	// Setup Fiber app
+	app := fiber.New()
+	// Define the route
+	app.Post("/change_user_status/:userId", ChangeUserStatus)
+	// Test cases
+	tests := []struct {
+		description  string
+		payload      map[string]any
+		userId       int
+		expectedCode int
+		expectedBody string
+		expectedData map[string]interface{} // expected data for detailed field checking
+	}{
+		{
+			description: "success disable",
+			userId:      2,
+			payload: map[string]any{
+				"status": "DISABLED",
+			},
+			expectedCode: fiber.StatusOK,
+		},
+		{
+			description: "success enable",
+			userId:      2,
+			payload: map[string]any{
+				"status": "OKAY",
+			},
+			expectedCode: fiber.StatusOK,
+		},
+		{
+			description: "same status",
+			userId:      2,
+			payload: map[string]any{
+				"status": "OKAY",
+			},
+			expectedCode: fiber.StatusNotAcceptable,
+		},
+		{
+			description: "invalid user",
+			userId:      -1,
+			payload: map[string]any{
+				"status": "OKAY",
+			},
+			expectedCode: fiber.StatusNotAcceptable,
+		},
+		{
+			description: "invalid status",
+			userId:      2,
+			payload: map[string]any{
+				"status": "OKAYY",
+			},
+			expectedCode: fiber.StatusNotAcceptable,
+		},
+		{
+			description:  "missing fields",
+			payload:      map[string]any{},
+			expectedCode: 400,
+		},
+	}
+
+	// Initialize the assert object
+	a := assert.New(t)
+
+	// Run the tests
+	for _, test := range tests {
+		reqBody, _ := json.Marshal(test.payload)
+		req := httptest.NewRequest("POST", fmt.Sprintf("/change_user_status/%d", test.userId), bytes.NewReader(reqBody))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", token)
+
+		resp, _ := app.Test(req, -1)
+		// Check the status code
+		a.Equal(test.expectedCode, resp.StatusCode, test.description)
+
+		// Read the response body
+		body, _ := io.ReadAll(resp.Body)
+		fmt.Println(string(body))
+		var result map[string]interface{}
+		json.Unmarshal(body, &result)
+		// Check each field
+		a.Equal(int(result["status"].(float64)), resp.StatusCode, test.description, "Status")
+		a.NotEmpty(result["message"], test.description, "Message")
+	}
+}
