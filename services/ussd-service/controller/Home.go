@@ -653,7 +653,7 @@ func completeRegistration(args ...interface{}) string {
 	if err != nil {
 		return err.Error()
 	}
-	go utils.SendSMS(config.DB, args[3].(string), sms_message, viper.GetString("SENDER_ID"), config.ServiceName, message_type, &customerId)
+	go utils.SendSMS(config.DB, args[3].(string), sms_message, viper.GetString("SENDER_ID"), config.ServiceName, message_type, &customerId, config.Redis)
 	return "success_entry"
 }
 func removeCustomer(customerId int) {
@@ -697,7 +697,7 @@ func entrySaveCode(args ...interface{}) string {
 	if err != nil {
 		return err.Error()
 	}
-	go utils.SendSMS(config.DB, args[3].(string), sms_message, viper.GetString("SENDER_ID"), config.ServiceName, message_type, USSDdata.CustomerId)
+	go utils.SendSMS(config.DB, args[3].(string), sms_message, viper.GetString("SENDER_ID"), config.ServiceName, message_type, USSDdata.CustomerId, config.Redis)
 	return ""
 }
 func end_session(args ...interface{}) string {

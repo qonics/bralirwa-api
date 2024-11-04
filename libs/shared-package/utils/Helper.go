@@ -16,6 +16,7 @@ import (
 	"reflect"
 	"regexp"
 	"shared-package/proto"
+	"strconv"
 	"strings"
 	"text/template"
 	"time"
@@ -448,7 +449,7 @@ func ValidateMTNPhone(phoneNumber string) (string, error) {
 }
 
 // send sms, return message_id on success and error if any
-func SendSMS(DB *pgxpool.Pool, phoneNumber string, message string, senderName string, serviceName string, messageType string, customerId *int) (string, error) {
+func SendSMS(DB *pgxpool.Pool, phoneNumber string, message string, senderName string, serviceName string, messageType string, customerId *int, redis *redis.Client) (string, error) {
 	//skip this if it is test
 	if IsTestMode {
 		return "TEST_SMS_ID", nil
@@ -488,6 +489,7 @@ func SendSMS(DB *pgxpool.Pool, phoneNumber string, message string, senderName st
 			error_message = "failed to send sms, err: " + result["message"].(string)
 		} else {
 			messageId = result["message_id"].(string)
+			redis.Set(ctx, "UPDATE_SMS_BALANCE", "0", 0)
 		}
 	} else {
 		LogMessage("critical", "SendSMS: failed to send sms, system error, body: "+string(body), serviceName)
@@ -506,6 +508,61 @@ func SendSMS(DB *pgxpool.Pool, phoneNumber string, message string, senderName st
 		LogMessage("critical", "SendSMS: failed to save sms, err: "+err.Error(), serviceName)
 	}
 	return messageId, nil
+}
+
+// send sms, return message_id on success and error if any
+func SMSBalance(DB *pgxpool.Pool, serviceName string, redis *redis.Client) (int, error) {
+	//skip this if it is test
+	if IsTestMode {
+		return 10, nil
+	}
+	localCredit := redis.Get(ctx, "SMS_BALANCE")
+	forceUpdate := redis.Get(ctx, "UPDATE_SMS_BALANCE")
+	if forceUpdate.Val() == "0" {
+		localCreditInt, _ := strconv.Atoi(localCredit.Val())
+		return localCreditInt, nil
+	}
+	//send http json request
+	request, err := http.NewRequest("GET", fmt.Sprintf("%s/api/v1/balance/send-sms/rw", viper.GetString("SMS_URL")), nil)
+	if err != nil {
+		return 0, err
+	}
+	request.Header.Set("x-api-key", viper.GetString("SMS_KEY"))
+	request.Header.Set("Content-Type", "application/json")
+	client := &http.Client{}
+	resp, err := client.Do(request)
+	error_message := ""
+	if err != nil {
+		error_message = err.Error()
+	}
+	// Read the response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		error_message = err.Error()
+	}
+	var result map[string]interface{}
+	err = json.Unmarshal(body, &result)
+	if err != nil {
+		error_message = err.Error()
+	}
+	if error_message != "" {
+		return 0, errors.New(error_message)
+	}
+	if res, ok := result["status"].(float64); ok {
+		if res != 200 {
+			error_message = "failed to get sms balance, err: " + result["message"].(string)
+		} else {
+			data := result["data"].(map[string]interface{})
+			credit := int(data["credit"].(float64))
+			redis.Set(ctx, "UPDATE_SMS_BALANCE", "0", 0)
+			redis.Set(ctx, "SMS_BALANCE", credit, 0)
+			return credit, nil
+		}
+	} else {
+		LogMessage("critical", "SMSBalance: failed to get sms balance, system error, body: "+string(body), serviceName)
+		error_message = "failed to get sms balance, system error"
+	}
+	return 0, errors.New(error_message)
 }
 
 // IsStrongPassword checks if the given password is strong from validator, you will register customer validator and use it .

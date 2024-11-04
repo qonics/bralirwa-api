@@ -732,7 +732,7 @@ func AddUser(c *fiber.Ctx) error {
 		})
 	}
 	//send password to user phone (sms)
-	go utils.SendSMS(config.DB, formData.Phone, fmt.Sprintf("Your password is %s, please change it after login\n\n%s", rawPassword, viper.GetString("ap_name")), viper.GetString("SENDER_ID"), config.ServiceName, "password", nil)
+	go utils.SendSMS(config.DB, formData.Phone, fmt.Sprintf("Your password is %s, please change it after login\n\n%s", rawPassword, viper.GetString("ap_name")), viper.GetString("SENDER_ID"), config.ServiceName, "password", nil, config.Redis)
 	utils.RecordActivityLog(config.DB,
 		utils.ActivityLog{
 			UserID:       userPayload.Id,
@@ -1049,7 +1049,7 @@ func ForgotPassword(c *fiber.Ctx) error {
 		nil,
 	)
 	//send email containing otp
-	go utils.SendSMS(config.DB, phone, fmt.Sprintf("Dear %s, %s is the OTP for reseting your password. don't share it with anyone.", fname, otp), viper.GetString("SENDER_ID"), config.ServiceName, "reset_password_otp", nil)
+	go utils.SendSMS(config.DB, phone, fmt.Sprintf("Dear %s, %s is the OTP for reseting your password. don't share it with anyone.", fname, otp), viper.GetString("SENDER_ID"), config.ServiceName, "reset_password_otp", nil, config.Redis)
 	return successResponse
 }
 func ValidateOTP(c *fiber.Ctx) error {
@@ -1566,7 +1566,7 @@ func StartPrizeDraw(c *fiber.Ctx) error {
 		},
 	)
 	//send sms
-	go utils.SendSMS(config.DB, customerPhone, prizeMessage, viper.GetString("SENDER_ID"), config.ServiceName, "prize_won", &selectedEntry.Customer.Id)
+	go utils.SendSMS(config.DB, customerPhone, prizeMessage, viper.GetString("SENDER_ID"), config.ServiceName, "prize_won", &selectedEntry.Customer.Id, config.Redis)
 	c.SendStatus(200)
 	arrayCode := strings.Split(rawCode, "")
 	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "Draw ended successfully",
@@ -1842,6 +1842,7 @@ func UploadCodes(c *fiber.Ctx) error {
 	valueArgs := make([]interface{}, 0, len(codes)*3)
 
 	for _, code := range codes {
+		code.Code = strings.ToUpper(code.Code)
 		if len(code.Code) != 10 {
 			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Invalid code length, code should be 10 digits")
 		} else if utils.ValidateString(code.Code, "") {
@@ -2031,4 +2032,86 @@ func DistributeMomoPrize() {
 		}
 		//TODO: send prize to user based on MNO
 	}
+}
+func GetSMSBalance(c *fiber.Ctx) error {
+	_, err := utils.SecurePath(c, config.Redis)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
+	}
+	smsBalance, err := utils.SMSBalance(config.DB, config.ServiceName, config.Redis)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to get sms balance", utils.Logger{
+			LogLevel:    utils.CRITICAL,
+			Message:     "GetSMSBalance: Unable to get sms balance, error: " + err.Error(),
+			ServiceName: config.ServiceName,
+		})
+	}
+	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "balance": smsBalance})
+}
+func ChangeUserStatus(c *fiber.Ctx) error {
+	userPayload, err := utils.SecurePath(c, config.Redis)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
+	}
+	userId, err := c.ParamsInt("userId")
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Invalid user id provided")
+	}
+	type FormData struct {
+		Status string `json:"status" binding:"required" validate:"required,oneof=OKAY DISABLED"`
+	}
+	responseStatus := 200
+	formData := new(FormData)
+	if err := c.BodyParser(formData); err != nil || formData.Status == "" {
+		responseStatus = 400
+		c.SendStatus(responseStatus)
+		return c.JSON(fiber.Map{"status": responseStatus, "message": "Please provide all required data - " + formData.Status, "details": err})
+	}
+	if err := Validate.Struct(formData); err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Provide data are not valid")
+	}
+	//get existing status
+	var status, fname, phone string
+	err = config.DB.QueryRow(ctx, `select status,fname,phone from users where id=$1`, userId).Scan(&status, &fname, &phone)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "User data is invalid")
+		}
+		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to change user status", utils.Logger{
+			LogLevel:    utils.CRITICAL,
+			Message:     "ChangeUserStatus: Unable to change user status, error: " + err.Error(),
+			ServiceName: config.ServiceName,
+		})
+	}
+	if status == formData.Status {
+		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "User status is already "+formData.Status)
+	}
+	_, err = config.DB.Exec(ctx, `update users set status=$1 where id=$2`, formData.Status, userId)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to change user status", utils.Logger{
+			LogLevel:    utils.CRITICAL,
+			Message:     "ChangeUserStatus: Unable to change user status, error: " + err.Error(),
+			ServiceName: config.ServiceName,
+		})
+	}
+	action := "enable"
+	if formData.Status == "DISABLED" {
+		action = "disable"
+	}
+	utils.RecordActivityLog(config.DB,
+		utils.ActivityLog{
+			UserID:       userPayload.Id,
+			ActivityType: action + "User",
+			Description:  action + " user account of" + fname + ", Phone: " + phone,
+			Status:       "success",
+			IPAddress:    c.IP(),
+			UserAgent:    c.Get("User-Agent"),
+		},
+		config.ServiceName,
+		&map[string]interface{}{
+			"user_id": userId,
+			"status":  formData.Status,
+		},
+	)
+	return c.JSON(fiber.Map{"status": responseStatus, "message": "Account of " + fname + " " + action + "d successfully"})
 }

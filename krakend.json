@@ -837,6 +837,60 @@
         "User-Agent",
         "Host"
       ]
+    },
+    {
+      "endpoint": "/api/v1/sms_balance",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/api/v1/sms_balance",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "GET",
+          "host": [
+            "http://web-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ],
+      "input_query_strings": [
+        "start_date",
+        "end_date"
+      ],
+      "input_headers": [
+        "Authorization",
+        "Content-Type",
+        "User-Agent",
+        "Host"
+      ]
+    },
+    {
+      "endpoint": "/api/v1/user_status/{userId}",
+      "method": "POST",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/api/v1/user_status/{userId}",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "POST",
+          "host": [
+            "http://web-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ],
+      "input_query_strings": [
+        "start_date",
+        "end_date"
+      ],
+      "input_headers": [
+        "Authorization",
+        "Content-Type",
+        "User-Agent",
+        "Host"
+      ]
     }
   ]
 }
