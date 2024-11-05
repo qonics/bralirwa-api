@@ -731,3 +731,53 @@ func GenerateBoolWithOdds(rng *mathRand.Rand) bool {
 	odds := getOdds(currentTime.Hour())
 	return rng.Intn(100) < odds
 }
+
+func BuildQueryFilter(filter map[string]interface{}, args *[]interface{}) (string, int) {
+	i := 1
+	query := ""
+	for key, value := range filter {
+		if value != "" {
+			if len(query) != 0 {
+				query += " and "
+			}
+			//check if key contains any comparison operator (>, <, >=, <=, !=, =)
+			if strings.ContainsAny(key, "<>=") {
+				query += fmt.Sprintf("%s $%d", key, i)
+			} else {
+				query += fmt.Sprintf("%s = $%d", key, i)
+			}
+			*args = append(*args, value)
+			i++
+		}
+	}
+	if len(query) != 0 {
+		query = " where " + query
+	}
+	return query, i
+}
+func ValidateDateRanges(startDate string, endDate *string) error {
+	var startDateVal time.Time
+	if len(startDate) != 0 {
+		startDateVall, err := time.Parse("2006-01-02", startDate)
+		if err != nil {
+			return errors.New("invalid start date provided")
+		}
+		startDateVal = startDateVall
+	}
+	if len(*endDate) != 0 {
+		endDateVal, err := time.Parse("2006-01-02", *endDate)
+		if err != nil {
+			return errors.New("invalid end date provided")
+		}
+		//check if end date is after start date
+		if len(startDate) != 0 {
+			if endDateVal.Before(startDateVal) {
+				return errors.New("end date should be after start date")
+			}
+		}
+		//add one day to include the end date
+		endDateVal = endDateVal.AddDate(0, 0, 1)
+		*endDate = endDateVal.Format("2006-01-02")
+	}
+	return nil
+}
