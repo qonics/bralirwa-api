@@ -753,7 +753,7 @@ func dailyPrizeWinning(entryId int, code string, lang string) (string, string, b
 	var sms_message, message_type string
 	if isPrizeWon {
 		sms_message = prizeType.Message
-		message_type = "prize"
+		message_type = "prize_won"
 		if prizeType.DistrutionType == "momo" {
 			//fetch	customer phone and network operator
 			var mno string

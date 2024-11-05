@@ -287,6 +287,44 @@ func GetEntries(c *fiber.Ctx) error {
 	if err != nil {
 		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
 	}
+	startDateStr := c.Query("start_date")
+	endDateStr := c.Query("end_date")
+	provinceId := c.Query("province_id")
+	networkOperator := c.Query("network_operator")
+	//add pagination
+	page := c.QueryInt("page", 1)
+	limit := c.QueryInt("limit", 20)
+	if page < 1 {
+		page = 1
+	}
+	offSet := (page - 1) * limit
+
+	err = utils.ValidateDateRanges(startDateStr, &endDateStr)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, err.Error())
+	}
+	if len(provinceId) != 0 {
+		//check if user id is valid integer
+		_, err := strconv.Atoi(provinceId)
+		if err != nil {
+			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Invalid province id provided")
+		}
+	}
+
+	args1 := []interface{}{}
+	// limitStr := fmt.Sprintf(" limit $%d offset $%d", a+1, a+2)
+	logsFilter, ii := utils.BuildQueryFilter(
+		map[string]interface{}{
+			"e.created_at >= ":   startDateStr,
+			"e.created_at <= ":   endDateStr,
+			"c.province":         provinceId,
+			"c.network_operator": networkOperator,
+		},
+		&args1,
+	)
+	limitStr := fmt.Sprintf(" limit $%d offset $%d", ii, ii+1)
+	globalArgs := args1
+	args1 = append(args1, limit, offSet)
 	entries := []model.Entries{}
 	rows, err := config.DB.Query(ctx,
 		`select e.id,e.code_id,e.customer_id,e.created_at,p.id as province_id,p.name as province_name,d.id as district_id,d.name as district_name,
@@ -295,7 +333,7 @@ func GetEntries(c *fiber.Ctx) error {
 		inner join codes cd on e.code_id = cd.id
 		inner join province p on c.province = p.id
 		inner join district d on c.district = d.id
-		LEFT JOIN prize_type pt on cd.prize_type_id = pt.id`)
+		LEFT JOIN prize_type pt on cd.prize_type_id = pt.id `+logsFilter+` order by e.id desc`+limitStr, args1...)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get entries data failed", utils.Logger{
@@ -331,7 +369,20 @@ func GetEntries(c *fiber.Ctx) error {
 		}
 		entries = append(entries, entry)
 	}
-	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "data": entries})
+	totalEntries := 0
+	err = config.DB.QueryRow(ctx,
+		`select count(e.id) from entries e inner join customer c on e.customer_id = c.id `+logsFilter, globalArgs...).Scan(&totalEntries)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get entries data failed", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "GetEntries: Unable to get total entries data, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+	}
+	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "data": entries,
+		"pagination": fiber.Map{"page": page, "limit": limit, "total": totalEntries}})
 }
 
 func GetPrizes(c *fiber.Ctx) error {
@@ -339,13 +390,51 @@ func GetPrizes(c *fiber.Ctx) error {
 	if err != nil {
 		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
 	}
+	startDateStr := c.Query("start_date")
+	endDateStr := c.Query("end_date")
+	typeId := c.Query("type_id")
+	code := c.Query("code")
+	//add pagination
+	page := c.QueryInt("page", 1)
+	limit := c.QueryInt("limit", 20)
+	if page < 1 {
+		page = 1
+	}
+	offSet := (page - 1) * limit
+
+	err = utils.ValidateDateRanges(startDateStr, &endDateStr)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, err.Error())
+	}
+	if len(typeId) != 0 {
+		//check if user id is valid integer
+		_, err := strconv.Atoi(typeId)
+		if err != nil {
+			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Invalid type id provided")
+		}
+	}
+
+	args1 := []interface{}{}
+	// limitStr := fmt.Sprintf(" limit $%d offset $%d", a+1, a+2)
+	logsFilter, ii := utils.BuildQueryFilter(
+		map[string]interface{}{
+			"p.created_at >= ": startDateStr,
+			"p.created_at <= ": endDateStr,
+			"p.prize_type_id":  typeId,
+			"p.code":           code,
+		},
+		&args1,
+	)
+	limitStr := fmt.Sprintf(" limit $%d offset $%d", ii, ii+1)
+	globalArgs := args1
+	args1 = append(args1, limit, offSet)
 	prizes := []model.Prize{}
 	rows, err := config.DB.Query(ctx,
 		`select p.id,p.rewarded,p.created_at,p.prize_value,p.prize_type_id,pc.name as category_name,pc.status as category_status,pc.created_at as category_created_at,
-		e.customer_id,pt.name,pc.id from prize p
+		e.customer_id,pt.name,pc.id,p.code from prize p
 		inner join entries e on p.entry_id = e.id
 		inner join prize_type pt on pt.id = p.prize_type_id
-		inner join prize_category pc on pt.prize_category_id = pc.id`)
+		inner join prize_category pc on pt.prize_category_id = pc.id `+logsFilter+` order by p.id desc`+limitStr, args1...)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get prizes data failed", utils.Logger{
@@ -359,7 +448,7 @@ func GetPrizes(c *fiber.Ctx) error {
 	for rows.Next() {
 		prize := model.Prize{}
 		err = rows.Scan(&prize.Id, &prize.Rewarded, &prize.CreatedAt, &prize.Value, &prize.PrizeType.Id, &prize.PrizeCategory.Name, &prize.PrizeCategory.Status,
-			&prize.PrizeCategory.CreatedAt, &prize.Customer.Id, &prize.PrizeType.Name, &prize.PrizeCategory.Id)
+			&prize.PrizeCategory.CreatedAt, &prize.Customer.Id, &prize.PrizeType.Name, &prize.PrizeCategory.Id, &prize.Code)
 		prize.Customer.Phone = "**********"
 		prize.Customer.Names = "**********"
 		if err != nil {
@@ -371,7 +460,20 @@ func GetPrizes(c *fiber.Ctx) error {
 		}
 		prizes = append(prizes, prize)
 	}
-	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "data": prizes})
+	totalPrizes := 0
+	err = config.DB.QueryRow(ctx,
+		`select count(id) from prize p `+logsFilter, globalArgs...).Scan(&totalPrizes)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get prizes data failed", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "GetPrizes: Unable to get total prizes data, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+	}
+	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "data": prizes,
+		"pagination": fiber.Map{"page": page, "limit": limit, "total": totalPrizes}})
 }
 
 func CreatePrizeCategory(c *fiber.Ctx) error {
@@ -627,6 +729,35 @@ func GetDraws(c *fiber.Ctx) error {
 	if err != nil {
 		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
 	}
+	startDateStr := c.Query("start_date")
+	endDateStr := c.Query("end_date")
+	code := c.Query("code")
+	//add pagination
+	page := c.QueryInt("page", 1)
+	limit := c.QueryInt("limit", 20)
+	if page < 1 {
+		page = 1
+	}
+	offSet := (page - 1) * limit
+
+	err = utils.ValidateDateRanges(startDateStr, &endDateStr)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, err.Error())
+	}
+
+	args1 := []interface{}{}
+	// limitStr := fmt.Sprintf(" limit $%d offset $%d", a+1, a+2)
+	logsFilter, ii := utils.BuildQueryFilter(
+		map[string]interface{}{
+			"d.created_at >= ": startDateStr,
+			"d.created_at <= ": endDateStr,
+			"d.code":           code,
+		},
+		&args1,
+	)
+	limitStr := fmt.Sprintf(" limit $%d offset $%d", ii, ii+1)
+	globalArgs := args1
+	args1 = append(args1, limit, offSet)
 	draws := []model.Draw{}
 	rows, err := config.DB.Query(ctx,
 		`select d.id,d.code,d.customer_id,d.created_at,d.status,p.id as province_id,p.name as province_name,ds.id as district_id,ds.name as district_name,
@@ -634,7 +765,7 @@ func GetDraws(c *fiber.Ctx) error {
 		inner join customer c on d.customer_id = c.id
 		inner join province p on c.province = p.id
 		inner join district ds on c.district = ds.id
-		LEFT JOIN prize_type pt on d.prize_type_id = pt.id`)
+		LEFT JOIN prize_type pt on d.prize_type_id = pt.id`+logsFilter+` order by d.id desc`+limitStr, args1...)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get draw data failed", utils.Logger{
@@ -668,7 +799,20 @@ func GetDraws(c *fiber.Ctx) error {
 		}
 		draws = append(draws, draw)
 	}
-	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "data": draws})
+	totalDraws := 0
+	err = config.DB.QueryRow(ctx,
+		`select count(id) from draw d `+logsFilter, globalArgs...).Scan(&totalDraws)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get draws data failed", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "GetDraws: Unable to get total draws data, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+	}
+	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "data": draws,
+		"pagination": fiber.Map{"page": page, "limit": limit, "total": totalDraws}})
 }
 func AddUser(c *fiber.Ctx) error {
 	userPayload, err := utils.SecurePath(c, config.Redis)
@@ -732,7 +876,7 @@ func AddUser(c *fiber.Ctx) error {
 		})
 	}
 	//send password to user phone (sms)
-	go utils.SendSMS(config.DB, formData.Phone, fmt.Sprintf("Your password is %s, please change it after login\n\n%s", rawPassword, viper.GetString("ap_name")), viper.GetString("SENDER_ID"), config.ServiceName, "password", nil, config.Redis)
+	go utils.SendSMS(config.DB, formData.Phone, fmt.Sprintf("Your password is %s, please change it after login\n\n%s", rawPassword, viper.GetString("ap_name")), viper.GetString("SENDER_ID"), config.ServiceName, "account_password", nil, config.Redis)
 	utils.RecordActivityLog(config.DB,
 		utils.ActivityLog{
 			UserID:       userPayload.Id,
@@ -793,7 +937,6 @@ func GetCustomer(c *fiber.Ctx) error {
 	}
 	customerId := c.Params("customerId")
 	customer := model.Customer{}
-	fmt.Println("Secret key", config.EncryptionKey)
 	err = config.DB.QueryRow(ctx,
 		`select p.id as province_id,p.name as province_name,d.id as district_id,d.name as district_name,
 		c.created_at,c.network_operator,c.locale,pgp_sym_decrypt(c.names::bytea,$1) as names,pgp_sym_decrypt(c.phone::bytea,$1) as phone,c.id from customer c
@@ -1632,10 +1775,38 @@ func GetSMSSent(c *fiber.Ctx) error {
 		ErrorMessage string    `json:"error_message"`
 		CreatedAt    time.Time `json:"created_at"`
 	}
+	startDateStr := c.Query("start_date")
+	endDateStr := c.Query("end_date")
+	messageType := c.Query("message_type")
+	//add pagination
+	page := c.QueryInt("page", 1)
+	limit := c.QueryInt("limit", 20)
+	if page < 1 {
+		page = 1
+	}
+	offSet := (page - 1) * limit
 
+	err = utils.ValidateDateRanges(startDateStr, &endDateStr)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, err.Error())
+	}
+
+	args1 := []interface{}{}
+	// limitStr := fmt.Sprintf(" limit $%d offset $%d", a+1, a+2)
+	logsFilter, ii := utils.BuildQueryFilter(
+		map[string]interface{}{
+			"sms.created_at >= ": startDateStr,
+			"sms.created_at <= ": endDateStr,
+			"sms.type":           messageType,
+		},
+		&args1,
+	)
+	limitStr := fmt.Sprintf(" limit $%d offset $%d", ii, ii+1)
+	globalArgs := args1
+	args1 = append(args1, limit, offSet)
 	smsData := []SmsData{}
 	rows, err := config.DB.Query(ctx,
-		`select message_id,message,phone,type,status,error_message,created_at from sms`)
+		`select message_id,message,phone,type,status,error_message,created_at from sms`+logsFilter+` order by id desc`+limitStr, args1...)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get sms data failed", utils.Logger{
@@ -1658,7 +1829,20 @@ func GetSMSSent(c *fiber.Ctx) error {
 		}
 		smsData = append(smsData, sms)
 	}
-	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "data": smsData})
+	totalSms := 0
+	err = config.DB.QueryRow(ctx,
+		`select count(id) from sms `+logsFilter, globalArgs...).Scan(&totalSms)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get sms sent data failed", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "GetSMSSent: Unable to get total sms sent data, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+	}
+	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "data": smsData,
+		"pagination": fiber.Map{"page": page, "limit": limit, "total": totalSms}})
 }
 func GetPrizeOverview(c *fiber.Ctx) error {
 	_, err := utils.SecurePath(c, config.Redis)
@@ -1903,38 +2087,10 @@ func GetLogs(c *fiber.Ctx) error {
 		page = 1
 	}
 	offSet := (page - 1) * limit
-	logsFilter := ""
-	args := []interface{}{}
-	var startDate time.Time
-	a := 0
-	if len(startDateStr) != 0 {
-		startDate, err = time.Parse("2006-01-02", startDateStr)
-		if err != nil {
-			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Invalid start date provided")
-		}
-		a++
-		logsFilter += "l.created_at >= " + fmt.Sprintf("$%d", a)
-		args = append(args, startDateStr)
-	}
-	if len(endDateStr) != 0 {
-		endDate, err := time.Parse("2006-01-02", endDateStr)
-		//check if end date is after start date
-		if len(startDateStr) != 0 {
-			if endDate.Before(startDate) {
-				return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "End date should be after start date")
-			}
-		}
-		//add one day to include the end date
-		endDate = endDate.AddDate(0, 0, 1)
-		if err != nil {
-			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Invalid end date provided")
-		}
-		if len(logsFilter) != 0 {
-			logsFilter += " and "
-			a++
-		}
-		args = append(args, endDate)
-		logsFilter += "l.created_at <= " + fmt.Sprintf("$%d", a)
+
+	err = utils.ValidateDateRanges(startDateStr, &endDateStr)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, err.Error())
 	}
 	if len(userId) != 0 {
 		//check if user id is valid integer
@@ -1942,13 +2098,17 @@ func GetLogs(c *fiber.Ctx) error {
 		if err != nil {
 			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Invalid user id provided")
 		}
-		if len(logsFilter) != 0 {
-			logsFilter += " and "
-			a++
-		}
-		args = append(args, userId)
-		logsFilter += "l.user_id = " + fmt.Sprintf("$%d", a)
 	}
+
+	args1 := []interface{}{}
+	// limitStr := fmt.Sprintf(" limit $%d offset $%d", a+1, a+2)
+	logsFilter, ii := utils.BuildQueryFilter(map[string]interface{}{
+		"l.created_at >= ": startDateStr,
+		"l.created_at <= ": endDateStr,
+		"l.user_id":        userId,
+	},
+		&args1,
+	)
 	if len(query) != 0 {
 		//check if user id is valid integer
 		if utils.ValidateString(query, "") {
@@ -1956,24 +2116,21 @@ func GetLogs(c *fiber.Ctx) error {
 		}
 		if len(logsFilter) != 0 {
 			logsFilter += " and "
-			a++
+		} else {
+			logsFilter += " where "
 		}
-		args = append(args, query)
-		logsFilter += "l.description ilike " + fmt.Sprintf("$%d", a)
+		args1 = append(args1, query)
+		// logsFilter += "l.description ilike " + fmt.Sprintf("$%d", a)
+		logsFilter += "to_tsvector('english', l.description) @@ plainto_tsquery('english', " + fmt.Sprintf("$%d", ii) + ")"
+		ii++
 	}
-	if len(logsFilter) != 0 {
-		logsFilter = " where " + logsFilter
-	}
-	limitStr := fmt.Sprintf(" limit $%d offset $%d", a+1, a+2)
-	globalArgs := args
-	args = append(args, limit, offSet)
+	limitStr := fmt.Sprintf(" limit $%d offset $%d", ii, ii+1)
+	globalArgs := args1
+	args1 = append(args1, limit, offSet)
 	logs := []utils.ActivityLog{}
-	fmt.Println(`select l.user_id,l.activity_type,l.status,l.description,l.ip_address::text,l.user_agent,l.created_at,u.fname,u.lname,u.email,u.phone from activity_logs l ` + logsFilter +
-		` inner join users u on u.id = l.user_id order by l.created_at desc` + limitStr)
-	fmt.Println(args)
 	rows, err := config.DB.Query(ctx,
-		`select l.user_id,l.activity_type,l.status,l.description,l.ip_address::text,l.user_agent,l.created_at,u.fname,u.lname,u.email,u.phone from activity_logs l `+logsFilter+
-			` inner join users u on u.id = l.user_id order by l.created_at desc`+limitStr, args...)
+		`select l.user_id,l.activity_type,l.status,l.description,l.ip_address::text,l.user_agent,l.created_at,u.fname,u.lname,u.email,u.phone from activity_logs l `+
+			` inner join users u on u.id = l.user_id `+logsFilter+` order by l.created_at desc`+limitStr, args1...)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get activity logs data failed", utils.Logger{
@@ -2114,4 +2271,36 @@ func ChangeUserStatus(c *fiber.Ctx) error {
 		},
 	)
 	return c.JSON(fiber.Map{"status": responseStatus, "message": "Account of " + fname + " " + action + "d successfully"})
+}
+func GetProvinces(c *fiber.Ctx) error {
+	_, err := utils.SecurePath(c, config.Redis)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
+	}
+	provinces := []model.Province{}
+	rows, err := config.DB.Query(ctx,
+		`select id,name,created_at from province`)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get province data failed", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "GetProvinces: Unable to get province data, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+		return utils.JsonErrorResponse(c, fiber.StatusForbidden, "province data is not valid")
+	}
+	for rows.Next() {
+		province := model.Province{}
+		err = rows.Scan(&province.Id, &province.Name, &province.CreatedAt)
+		if err != nil {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get province data failed", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "GetProvinces: Unable to get province data, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+		provinces = append(provinces, province)
+	}
+	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "data": provinces})
 }

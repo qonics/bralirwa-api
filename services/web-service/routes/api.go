@@ -72,5 +72,6 @@ func InitRoutes() *fiber.App {
 	v1.Get("/logs", controller.GetLogs)
 	v1.Get("/sms_balance", controller.GetSMSBalance)
 	v1.Post("/user_status/:userId", controller.ChangeUserStatus)
+	v1.Get("/provinces", controller.GetProvinces)
 	return app
 }

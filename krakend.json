@@ -203,6 +203,16 @@
           "disable_host_sanitize": false
         }
       ],
+      "input_query_strings": [
+        "start_date",
+        "end_date",
+        "province_id",
+        "district_id",
+        "phone",
+        "network_operator",
+        "page",
+        "limit"
+      ],
       "input_headers": [
         "Authorization",
         "Content-Type",
@@ -318,6 +328,14 @@
           "disable_host_sanitize": false
         }
       ],
+      "input_query_strings": [
+        "start_date",
+        "end_date",
+        "type_id",
+        "code",
+        "page",
+        "limit"
+      ],
       "input_headers": [
         "Authorization",
         "Content-Type",
@@ -386,6 +404,13 @@
           ],
           "disable_host_sanitize": false
         }
+      ],
+      "input_query_strings": [
+        "start_date",
+        "end_date",
+        "code",
+        "page",
+        "limit"
       ],
       "input_headers": [
         "Authorization",
@@ -731,6 +756,13 @@
           "disable_host_sanitize": false
         }
       ],
+      "input_query_strings": [
+        "start_date",
+        "end_date",
+        "message_type",
+        "page",
+        "limit"
+      ],
       "input_headers": [
         "Authorization",
         "Content-Type",
@@ -829,7 +861,11 @@
       ],
       "input_query_strings": [
         "start_date",
-        "end_date"
+        "end_date",
+        "user_id",
+        "query",
+        "page",
+        "limit"
       ],
       "input_headers": [
         "Authorization",
@@ -845,6 +881,33 @@
       "backend": [
         {
           "url_pattern": "/api/v1/sms_balance",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "GET",
+          "host": [
+            "http://web-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ],
+      "input_query_strings": [
+        "start_date",
+        "end_date"
+      ],
+      "input_headers": [
+        "Authorization",
+        "Content-Type",
+        "User-Agent",
+        "Host"
+      ]
+    },
+    {
+      "endpoint": "/api/v1/provinces",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/api/v1/provinces",
           "encoding": "no-op",
           "sd": "static",
           "method": "GET",
