@@ -9,10 +9,13 @@ type Transactions struct {
 	Phone           string    `json:"phone"`
 	Mno             string    `json:"mno"`
 	TrxId           string    `json:"trx_id"`
-	RefNo           string    `json:"ref_no"`
+	RefNo           *string   `json:"ref_no"`
 	TransactionType string    `json:"transaction_type"`
 	CustomerId      int       `json:"customer_id"`
 	InitiatedBy     string    `json:"initiated_by"`
+	Code            string    `json:"code"`
+	ErrorMessage    *string   `json:"error_message"`
+	EntryId         int       `json:"entry_id"`
 	Status          string    `json:"status"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`

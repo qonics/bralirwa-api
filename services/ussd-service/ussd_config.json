@@ -39,7 +39,7 @@
                     "input": "",
                     "value": null,
                     "action": "preRegisterSaveCode",
-                    "next_step": "register_name"
+                    "next_step": "register_province"
                 }
             ],
             "allow_back": true,
