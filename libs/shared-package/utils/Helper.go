@@ -554,8 +554,8 @@ func SMSBalance(DB *pgxpool.Pool, serviceName string, redis *redis.Client) (int,
 		} else {
 			data := result["data"].(map[string]interface{})
 			credit := int(data["credit"].(float64))
-			redis.Set(ctx, "UPDATE_SMS_BALANCE", "0", 0)
-			redis.Set(ctx, "SMS_BALANCE", credit, 0)
+			redis.Set(ctx, "UPDATE_SMS_BALANCE", "0", 30*time.Minute)
+			redis.Set(ctx, "SMS_BALANCE", credit, 30*time.Minute)
 			return credit, nil
 		}
 	} else {

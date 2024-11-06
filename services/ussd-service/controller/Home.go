@@ -166,6 +166,7 @@ func processUSSD(input *string, phone string, sessionId string, networkOperator 
 		}
 		extraData := make(map[string]interface{})
 		appendExtraData(sessionId, extraData, "momo_names", names)
+		appendExtraData(sessionId, extraData, "name", names)
 	}
 	if !isNewRequest && USSDdata.StepId == "welcome" {
 		if *input == "1" {
@@ -619,6 +620,7 @@ func completeRegistration(args ...interface{}) string {
 	extra, _ := getUssdDataItem(sessionId, "extra")
 	extraData := extra.(map[string]interface{})
 	provinceId := extraData["province"]
+	// name := extraData["name"]
 	name := extraData["name"]
 	momo_names := extraData["momo_names"]
 	var customerId int

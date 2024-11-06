@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"logger-service/helper"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -566,7 +567,7 @@ func CreatePrizeType(c *fiber.Ctx) error {
 		ExpiryDate      time.Time            `json:"expiry_date" binding:"required" validate:"required"`
 		Period          string               `json:"period" binding:"required" validate:"required,oneof=MONTHLY WEEKLY DAILY GRAND"`
 		Distribution    string               `json:"distribution" binding:"required" validate:"required,oneof=momo cheque other"`
-		TriggerBySystem bool                 `json:"trigger_by_system" binding:"required" validate:"required,boolean"`
+		TriggerBySystem bool                 `json:"trigger_by_system" binding:"required" validate:"boolean"`
 		Messages        []model.PrizeMessage `json:"messages" binding:"required" validate:"required"`
 	}
 	responseStatus := 200
@@ -978,7 +979,6 @@ func GetEntryData(c *fiber.Ctx) error {
 	}
 	entryId := c.Params("entryId")
 	entry := model.Entries{}
-	fmt.Println("Secret key", config.EncryptionKey)
 	var prizeTypeName *string
 	var prizeTypeId, prizeTypeValue *int
 	var PrizeDate *time.Time
@@ -993,7 +993,7 @@ func GetEntryData(c *fiber.Ctx) error {
 		inner join province p on c.province = p.id
 		inner join district d on c.district = d.id
 		LEFT join prize pr on pr.entry_id = e.id
-		LEFT JOIN prize_type pt on cd.prize_type_id = pt.id where c.id=$2`, config.EncryptionKey, entryId).
+		LEFT JOIN prize_type pt on cd.prize_type_id = pt.id where e.id=$2`, config.EncryptionKey, entryId).
 		Scan(&entry.Id, &entry.Code.Id, &entry.Customer.Id, &entry.CreatedAt, &entry.Customer.Province.Id, &entry.Customer.Province.Name,
 			&entry.Customer.District.Id, &entry.Customer.District.Name, &entry.Customer.CreatedAt, &prizeTypeName, &prizeTypeId, &prizeTypeValue,
 			&entry.Code.CreatedAt, &entry.Customer.NetworkOperator, &entry.Customer.Locale, &entry.Customer.Names, &entry.Customer.MOMONames,
@@ -2303,4 +2303,91 @@ func GetProvinces(c *fiber.Ctx) error {
 		provinces = append(provinces, province)
 	}
 	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "data": provinces})
+}
+func GetTransactions(c *fiber.Ctx) error {
+	_, err := utils.SecurePath(c, config.Redis)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
+	}
+	startDateStr := c.Query("start_date")
+	endDateStr := c.Query("end_date")
+	phone := c.Query("phone")
+	trxId := c.Query("trx_id")
+	refNo := c.Query("ref_no")
+	//add pagination
+	page := c.QueryInt("page", 1)
+	limit := c.QueryInt("limit", 20)
+	if page < 1 {
+		page = 1
+	}
+	offSet := (page - 1) * limit
+
+	err = utils.ValidateDateRanges(startDateStr, &endDateStr)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, err.Error())
+	}
+	// validate the phone using this regex ^2507[2389]\\d{7}$
+	regex := regexp.MustCompile(`^2507[2389]\d{7}$`)
+	if len(phone) != 0 {
+		if !regex.MatchString(phone) {
+			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Invalid phone number provided")
+		}
+	}
+	args1 := []interface{}{}
+	// limitStr := fmt.Sprintf(" limit $%d offset $%d", a+1, a+2)
+	logsFilter, ii := utils.BuildQueryFilter(map[string]interface{}{
+		"t.created_at >= ": startDateStr,
+		"t.created_at <= ": endDateStr,
+		"t.phone":          phone,
+		"t.ref_no":         refNo,
+		"t.trx_id":         trxId,
+	},
+		&args1,
+	)
+
+	limitStr := fmt.Sprintf(" limit $%d offset $%d", ii, ii+1)
+	globalArgs := args1
+	args1 = append(args1, limit, offSet)
+	transactions := []model.Transactions{}
+	rows, err := config.DB.Query(ctx,
+		`select t.id,t.amount,t.phone,t.mno,t.trx_id,t.ref_no,t.transaction_type,t.status,t.error_message,t.created_at,p.entry_id,p.code,t.customer_id,t.initiated_by from transaction t `+
+			` inner join prize p on p.id = t.prize_id `+logsFilter+` order by t.created_at desc`+limitStr, args1...)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get transaction data failed", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "GetTransactions: Unable to get sms data, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+		return utils.JsonErrorResponse(c, fiber.StatusForbidden, "transaction data is not valid")
+	}
+	for rows.Next() {
+		transaction := model.Transactions{}
+		err = rows.Scan(&transaction.Id, &transaction.Amount, &transaction.Phone, &transaction.Mno, &transaction.TrxId, &transaction.RefNo, &transaction.TransactionType,
+			&transaction.Status, &transaction.ErrorMessage, &transaction.CreatedAt, &transaction.EntryId, &transaction.Code, &transaction.CustomerId, &transaction.InitiatedBy)
+		if err != nil {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get transaction data failed", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "GetTransactions: Unable to get transaction data, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+		transactions = append(transactions, transaction)
+	}
+	//get total logs for pagination
+	totalTransaction := 0
+	err = config.DB.QueryRow(ctx,
+		`select count(id) from transaction t `+logsFilter, globalArgs...).Scan(&totalTransaction)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get transaction data failed", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "GetTransactions: Unable to get total transaction data, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+	}
+	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "data": transactions,
+		"pagination": fiber.Map{"page": page, "limit": limit, "total": totalTransaction}})
 }
