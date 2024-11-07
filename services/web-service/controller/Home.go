@@ -283,6 +283,54 @@ func GetPrizeType(c *fiber.Ctx) error {
 	}
 	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "data": prizes})
 }
+func GetPrizeTypeSpace(c *fiber.Ctx) error {
+	_, err := utils.SecurePath(c, config.Redis)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
+	}
+	prizeTypeId := c.Params("type_id")
+	prizeType := model.PrizeType{}
+	err = config.DB.QueryRow(ctx,
+		`select p.id,p.name,p.status,p.value,p.elligibility,p.period from prize_type p where p.id=$1`, prizeTypeId).
+		Scan(&prizeType.Id, &prizeType.Name, &prizeType.Status, &prizeType.Value, &prizeType.Elligibility, &prizeType.Period)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get prize type data failed", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "GetPrizeType: Unable to get prize type data, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+		return utils.JsonErrorResponse(c, fiber.StatusForbidden, "prize type data is not valid")
+	}
+	//get occupied prize space based on prize type period
+	prizeFilter := ""
+	if prizeType.Period == "MONTHLY" {
+		prizeFilter = "created_at >= now() - interval '1 month'"
+	} else if prizeType.Period == "WEEKLY" {
+		prizeFilter = "created_at >= now() - interval '1 week'"
+	} else if prizeType.Period == "DAILY" {
+		prizeFilter = "created_at >= now() - interval '1 day'"
+	}
+	if prizeFilter != "" {
+		prizeFilter = " and " + prizeFilter
+	}
+	occupiedSpace := 0
+	err = config.DB.QueryRow(ctx,
+		`select count(*) from prize where prize_type_id=$1`+prizeFilter, prizeTypeId).
+		Scan(&occupiedSpace)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get prize type data failed", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "GetPrizeType: Unable to get prize type data, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+	}
+	remaining := prizeType.Elligibility - occupiedSpace
+	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "elligibility": prizeType.Elligibility, "occupied": occupiedSpace, "remaining": remaining})
+}
 func GetEntries(c *fiber.Ctx) error {
 	_, err := utils.SecurePath(c, config.Redis)
 	if err != nil {
@@ -819,6 +867,9 @@ func AddUser(c *fiber.Ctx) error {
 	userPayload, err := utils.SecurePath(c, config.Redis)
 	if err != nil {
 		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
+	}
+	if !userPayload.CanAddUser {
+		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, "You don't have permission to add a user")
 	}
 	type FormData struct {
 		Fname          string `json:"fname" binding:"required" validate:"required,regex=^[a-zA-Z0-9 ]*$"`
@@ -1492,6 +1543,9 @@ func StartPrizeDraw(c *fiber.Ctx) error {
 	if err != nil {
 		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
 	}
+	if !userPayload.CanTriggerDraw {
+		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, "You don't have permission to start a draw")
+	}
 	type FormData struct {
 		PrizeType uint `json:"prize_type" validate:"required,number"`
 	}
@@ -1959,6 +2013,9 @@ func UploadCodes(c *fiber.Ctx) error {
 	if err != nil {
 		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
 	}
+	if !userPayload.CanAddCodes {
+		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, "You don't have permission to upload codes")
+	}
 	//TODO: check if user has right to upload code
 	file, err := c.FormFile("file")
 	if err != nil {
@@ -2072,9 +2129,12 @@ func UploadCodes(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": fmt.Sprintf("%v Codes uploaded successfully", len(codes)), "count": cmdTag.RowsAffected()})
 }
 func GetLogs(c *fiber.Ctx) error {
-	_, err := utils.SecurePath(c, config.Redis)
+	userPayload, err := utils.SecurePath(c, config.Redis)
 	if err != nil {
 		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
+	}
+	if !userPayload.CanViewLogs {
+		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, "You don't have permission to view logs")
 	}
 	startDateStr := c.Query("start_date")
 	endDateStr := c.Query("end_date")
@@ -2175,20 +2235,46 @@ func GetLogs(c *fiber.Ctx) error {
 // TODO: implement loop to distribute prize to users
 func DistributeMomoPrize() {
 	//fetch pending transaction
-	rows, err := config.DB.Query(ctx, `SELECT id,amount,phone,mno,trx_id,transaction_type FROM momo_transactions WHERE status = 'PENDING' LIMIT 1000;`)
+	fmt.Println("Distributing momo prize")
+	rows, err := config.DB.Query(ctx, `SELECT t.id,t.amount,t.phone,t.mno,t.trx_id,t.transaction_type,p.code FROM transaction t
+	INNER JOIN prize p on p.id = t.prize_id WHERE t.status = 'PENDING' LIMIT 1000;`)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			utils.LogMessage(string(utils.CRITICAL), "DistributeMomoPrize: Unable to fetch pending momo transactions, error: "+err.Error(), config.ServiceName)
 		}
 	}
+	a := 0
 	for rows.Next() {
+		a++
 		transaction := model.Transactions{}
-		err = rows.Scan(&transaction.Id, &transaction.Amount, &transaction.Phone, &transaction.Mno, &transaction.TrxId, &transaction.TransactionType)
+		err = rows.Scan(&transaction.Id, &transaction.Amount, &transaction.Phone, &transaction.Mno, &transaction.TrxId, &transaction.TransactionType, &transaction.Code)
 		if err != nil {
 			utils.LogMessage(string(utils.CRITICAL), "DistributeMomoPrize: Unable to scan pending momo transactions, error: "+err.Error(), config.ServiceName)
 		}
-		//TODO: send prize to user based on MNO
+		refNo := ""
+		if transaction.Mno == "MTN" {
+			refNo, err = utils.MoMoCredit(transaction.Amount, transaction.Phone, transaction.TrxId, transaction.Code)
+		}
+		fmt.Println("RefNo: ", refNo, "Error: ", err)
+		//TODO: add other network operators (Airtel)
+		if err != nil {
+			//update transaction status and error_message
+			_, err = config.DB.Exec(ctx, `UPDATE transaction SET status = 'FAILED', error_message = $1 WHERE id = $2;`, err.Error(), transaction.Id)
+			if err != nil {
+				utils.LogMessage(string(utils.CRITICAL), "DistributeMomoPrize: Unable to update momo transaction status, error: "+err.Error(), config.ServiceName)
+			}
+		} else {
+			//update transaction status and ref_no
+			_, err = config.DB.Exec(ctx, `UPDATE transaction SET status = 'SUCCESS', ref_no = $1 WHERE id = $2;`, refNo, transaction.Id)
+			if err != nil {
+				utils.LogMessage(string(utils.CRITICAL), "DistributeMomoPrize: Unable to update momo transaction status, error: "+err.Error(), config.ServiceName)
+			}
+		}
 	}
+	fmt.Println("Distributing momo prize end, rows affected: ", a)
+	//re run the function after 10 seconds
+	time.Sleep(10 * time.Second)
+	DistributeMomoPrize()
 }
 func GetSMSBalance(c *fiber.Ctx) error {
 	_, err := utils.SecurePath(c, config.Redis)

@@ -781,3 +781,55 @@ func ValidateDateRanges(startDate string, endDate *string) error {
 	}
 	return nil
 }
+
+func MoMoCredit(amount int, phone string, trxId string, code string) (string, error) {
+	if IsTestMode {
+		return "TEST_SMS_ID", nil
+	}
+	// TODO: set an amount to 20 for testing, it will be removed in production
+	payload := map[string]interface{}{
+		"amount":        20,
+		"account_no":    phone,
+		"transactionId": viper.GetString("MOMO_TRX_PREFIX") + trxId,
+		"currency":      "RWF",
+		"payment_type":  "momo",
+		"message":       "BRALIRWA Coca Cola campaign PRIZE, CODE: " + code,
+	}
+	jsonData, _ := json.Marshal(payload)
+	//send http json request
+	request, err := http.NewRequest("POST", fmt.Sprintf("%sapi/v1/momo/transfer", viper.GetString("MOMO_URL")), bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", err
+	}
+	request.Header.Set("Authorization", viper.GetString("MOMO_KEY"))
+	request.Header.Set("Content-Type", "application/json")
+	client := &http.Client{}
+	resp, err := client.Do(request)
+	if err != nil {
+		return "", err
+	}
+	// Read the response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	fmt.Println(string(body))
+	var result map[string]interface{}
+	err = json.Unmarshal(body, &result)
+	if err != nil {
+		return "", err
+	}
+	if res, ok := result["status"].(float64); ok {
+		if res != 200 {
+			error_message, ok := result["message"].(string)
+			if !ok {
+				return "", errors.New("failed to credit winner, err: " + error_message)
+			}
+			return "", errors.New("failed to credit winner, err: " + error_message)
+		}
+	} else {
+		LogMessage("critical", "MoMoCredit: failed to credit winner, system error, Code: "+code+" Phone: "+phone+" Amount: "+strconv.Itoa(amount)+" TrxId: "+trxId, "web-service")
+		return "", errors.New("failed to credit winner, system error. Code: " + code)
+	}
+	return result["momoRef"].(string), nil
+}
