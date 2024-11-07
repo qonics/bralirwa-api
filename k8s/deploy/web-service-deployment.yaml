@@ -28,12 +28,14 @@ spec:
               value: debug
             - name: WEB_URL
               value: https://bralirwa.testing.rw
+            - name: MOMO_TRX_PREFIX
+              value: PT
             - name: POSTGRES_DB_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: postgres.postgres.credentials.postgresql.acid.zalan.do  # Name of your secret
                   key: password  # Key of your secret
-          image: qonicsinc/lottery-web-service:1.0.8
+          image: qonicsinc/lottery-web-service:1.0.9
           name: web-service
       restartPolicy: Always
       imagePullSecrets:

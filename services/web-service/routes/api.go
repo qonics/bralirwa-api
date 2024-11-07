@@ -74,5 +74,6 @@ func InitRoutes() *fiber.App {
 	v1.Post("/user_status/:userId", controller.ChangeUserStatus)
 	v1.Get("/provinces", controller.GetProvinces)
 	v1.Get("/transactions", controller.GetTransactions)
+	v1.Get("/prize_type_space/:type_id", controller.GetPrizeTypeSpace)
 	return app
 }
