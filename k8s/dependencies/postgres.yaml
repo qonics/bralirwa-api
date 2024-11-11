@@ -6,6 +6,7 @@ spec:
   teamId: "qonics"
   volume:
     size: 50Gi
+    storageClass: manual  # Add this line
   numberOfInstances: 2
   users:
     postgres:  # database owner

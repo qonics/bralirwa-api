@@ -75,5 +75,7 @@ func InitRoutes() *fiber.App {
 	v1.Get("/provinces", controller.GetProvinces)
 	v1.Get("/transactions", controller.GetTransactions)
 	v1.Get("/prize_type_space/:type_id", controller.GetPrizeTypeSpace)
+	v1.Post("/confirm-trx/:transaction_id", controller.ConfirmTransaction)
+	v1.Post("/confirm-bulk-trx/", controller.ConfirmBulkTransaction)
 	return app
 }

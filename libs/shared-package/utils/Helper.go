@@ -489,7 +489,7 @@ func SendSMS(DB *pgxpool.Pool, phoneNumber string, message string, senderName st
 			error_message = "failed to send sms, err: " + result["message"].(string)
 		} else {
 			messageId = result["message_id"].(string)
-			redis.Set(ctx, "UPDATE_SMS_BALANCE", "0", 0)
+			redis.Set(ctx, "UPDATE_SMS_BALANCE", "1", 30*time.Minute)
 		}
 	} else {
 		LogMessage("critical", "SendSMS: failed to send sms, system error, body: "+string(body), serviceName)
@@ -499,7 +499,7 @@ func SendSMS(DB *pgxpool.Pool, phoneNumber string, message string, senderName st
 	if error_message != "" {
 		status = "FAILED"
 	}
-	if messageType == "password" {
+	if messageType == "password" || messageType == "reset_password_otp" || messageType == "account_password" {
 		message = "Message content is hidden for security reasons"
 	}
 	_, err = DB.Exec(ctx, "INSERT INTO sms (customer_id, message, phone, type, status, message_id, credit_count, error_message) VALUES ($1, $2, $3, $4, $5, $6, 0, $7)",
@@ -695,22 +695,6 @@ func RecordActivityLog(db *pgxpool.Pool, log ActivityLog, serviceName string, ex
 
 // getOdds returns the probability of getting true based on the hour of the day.
 func getOdds(hour int) int {
-	switch {
-	case hour >= 0 && hour < 7:
-		return 30
-	case hour >= 7 && hour < 12:
-		return 40
-	case hour >= 12 && hour < 16:
-		return 50
-	case hour >= 16 && hour < 22:
-		return 60
-	default:
-		return 50
-	}
-}
-
-// getOdds returns the probability of getting true based on the hour of the day.
-func GetOdds(hour int) int {
 	switch {
 	case hour >= 0 && hour < 7:
 		return 30
