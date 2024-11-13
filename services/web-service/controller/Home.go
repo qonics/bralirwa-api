@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bufio"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -8,6 +9,7 @@ import (
 	"fmt"
 	"logger-service/helper"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -288,7 +290,10 @@ func GetPrizeTypeSpace(c *fiber.Ctx) error {
 	if err != nil {
 		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
 	}
-	prizeTypeId := c.Params("type_id")
+	prizeTypeId, err := c.ParamsInt("type_id")
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusBadRequest, "Provide type id is not valid")
+	}
 	prizeType := model.PrizeType{}
 	err = config.DB.QueryRow(ctx,
 		`select p.id,p.name,p.status,p.value,p.elligibility,p.period from prize_type p where p.id=$1`, prizeTypeId).
@@ -297,7 +302,7 @@ func GetPrizeTypeSpace(c *fiber.Ctx) error {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get prize type data failed", utils.Logger{
 				LogLevel:    utils.CRITICAL,
-				Message:     "GetPrizeType: Unable to get prize type data, error: " + err.Error(),
+				Message:     "GetPrizeTypeSpace: Unable to get prize type data, error: " + err.Error(),
 				ServiceName: config.ServiceName,
 			})
 		}
@@ -323,13 +328,13 @@ func GetPrizeTypeSpace(c *fiber.Ctx) error {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get prize type data failed", utils.Logger{
 				LogLevel:    utils.CRITICAL,
-				Message:     "GetPrizeType: Unable to get prize type data, error: " + err.Error(),
+				Message:     "GetPrizeTypeSpace: Unable to get prize type data, error: " + err.Error(),
 				ServiceName: config.ServiceName,
 			})
 		}
 	}
 	remaining := prizeType.Elligibility - occupiedSpace
-	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "elligibility": prizeType.Elligibility, "occupied": occupiedSpace, "remaining": remaining})
+	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "name": prizeType.Name, "elligibility": prizeType.Elligibility, "occupied": occupiedSpace, "remaining": remaining})
 }
 func GetEntries(c *fiber.Ctx) error {
 	_, err := utils.SecurePath(c, config.Redis)
@@ -1044,7 +1049,7 @@ func GetEntryData(c *fiber.Ctx) error {
 		inner join province p on c.province = p.id
 		inner join district d on c.district = d.id
 		LEFT join prize pr on pr.entry_id = e.id
-		LEFT JOIN prize_type pt on cd.prize_type_id = pt.id where e.id=$2`, config.EncryptionKey, entryId).
+		LEFT JOIN prize_type pt on pr.prize_type_id = pt.id where e.id=$2`, config.EncryptionKey, entryId).
 		Scan(&entry.Id, &entry.Code.Id, &entry.Customer.Id, &entry.CreatedAt, &entry.Customer.Province.Id, &entry.Customer.Province.Name,
 			&entry.Customer.District.Id, &entry.Customer.District.Name, &entry.Customer.CreatedAt, &prizeTypeName, &prizeTypeId, &prizeTypeValue,
 			&entry.Code.CreatedAt, &entry.Customer.NetworkOperator, &entry.Customer.Locale, &entry.Customer.Names, &entry.Customer.MOMONames,
@@ -1582,12 +1587,39 @@ func StartPrizeDraw(c *fiber.Ctx) error {
 		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Selected prize can only be triggered by the system")
 	}
 	entryFilter := ""
+	excludeCustomers := []string{}
 	if period == "MONTHLY" {
 		entryFilter = "e.created_at >= now() - interval '1 month'"
 	} else if period == "WEEKLY" {
 		entryFilter = "e.created_at >= now() - interval '1 week'"
 	} else if period == "DAILY" {
 		entryFilter = "e.created_at >= now() - interval '1 day'"
+	} else if period == "GRAND" {
+		//exclude all monthly winners
+		rows, err := config.DB.Query(ctx,
+			`select e.customer_id from prize_type p INNER JOIN entries e ON e.id=p.entry_id INNER JOIN prize_type pt on pt.id p.prize_type_id
+			where pt.period='MONTHLY' group by e.customer_id`)
+		if err != nil {
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to start a new draw, system error", utils.Logger{
+					LogLevel:    utils.CRITICAL,
+					Message:     "StartPrizeDraw: Unable to fetch prize type data, error: " + err.Error(),
+					ServiceName: config.ServiceName,
+				})
+			}
+		}
+		for rows.Next() {
+			var prizeCustomerId string
+			err = rows.Scan(&prizeCustomerId)
+			if err != nil {
+				return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to start a new draw, system error", utils.Logger{
+					LogLevel:    utils.CRITICAL,
+					Message:     "StartPrizeDraw: Unable to scan prize type data, error: " + err.Error(),
+					ServiceName: config.ServiceName,
+				})
+			}
+			excludeCustomers = append(excludeCustomers, prizeCustomerId)
+		}
 	}
 	//fetch latest prizes (customerId) for the selected prize type
 	rows, err := config.DB.Query(ctx,
@@ -1601,7 +1633,6 @@ func StartPrizeDraw(c *fiber.Ctx) error {
 			})
 		}
 	}
-	excludeCustomers := []string{}
 	for rows.Next() {
 		var customerId string
 		err = rows.Scan(&customerId)
@@ -1614,6 +1645,7 @@ func StartPrizeDraw(c *fiber.Ctx) error {
 		}
 		excludeCustomers = append(excludeCustomers, customerId)
 	}
+
 	if len(excludeCustomers) != 0 {
 		if len(entryFilter) != 0 {
 			entryFilter += " and "
@@ -1737,15 +1769,19 @@ func StartPrizeDraw(c *fiber.Ctx) error {
 			ServiceName: config.ServiceName,
 		})
 	}
-	tx.Commit(ctx)
 	//distribute prize
 	if distributionType == "momo" {
-		_, err = config.DB.Exec(ctx, `insert into transaction (prize_id, amount, phone, mno, customer_id, transaction_type, initiated_by,status) values ($1, $2, $3, $4, $5,'DEBIT','SYSTEM','PENDING')`,
+		_, err = tx.Exec(ctx, `insert into transaction (prize_id, amount, phone, mno, customer_id, transaction_type, initiated_by,status) values ($1, $2, $3, $4, $5,'CREDIT','SYSTEM','WAITING')`,
 			prizeId, value, customerPhone, mno, selectedEntry.Customer.Id)
 		if err != nil {
-			utils.LogMessage("error", "entrySaveCode: #distribute_prize insert transaction failed: err:"+err.Error(), "ussd-service")
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to start a new draw, system error", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "entrySaveCode: #distribute_prize insert transaction failed: err:" + err.Error(),
+				ServiceName: config.ServiceName,
+			})
 		}
 	}
+	tx.Commit(ctx)
 	utils.RecordActivityLog(config.DB,
 		utils.ActivityLog{
 			UserID:       userPayload.Id,
@@ -1947,9 +1983,8 @@ func GetPrizeOverview(c *fiber.Ctx) error {
 		dateFilter = " where " + dateFilter
 	}
 	prizeOverviews := []PrizeOverview{}
-	query := fmt.Sprintf(`select sum(p.prize_value),count(p.id),sum(pt.elligibility),pt.name from prize p
+	query := fmt.Sprintf(`select sum(p.prize_value),count(p.id),pt.elligibility,pt.name from prize p
 	INNER JOIN prize_type pt ON pt.id=p.prize_type_id %s group by p.prize_type_id,pt.id`, dateFilter)
-	fmt.Println("Query:", query)
 	rows, err := config.DB.Query(ctx, query, args...)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
@@ -1987,9 +2022,8 @@ func GetCodeOverview(c *fiber.Ctx) error {
 		RemainCode int `json:"remainCode"`
 	}
 	codeOverview := CodeOverview{}
-	err = config.DB.QueryRow(ctx, `SELECT count(id) as total,
-    count(id) FILTER (WHERE status = 'used') as used_count,
-    count(id) FILTER (WHERE status = 'unused') as pending_count FROM codes;`).Scan(&codeOverview.TotalCode, &codeOverview.UsedCode, &codeOverview.RemainCode)
+	//pending_count
+	err = config.DB.QueryRow(ctx, `SELECT total,used_count FROM codes_count;`).Scan(&codeOverview.TotalCode, &codeOverview.UsedCode)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get codeOverview data failed", utils.Logger{
@@ -2004,6 +2038,7 @@ func GetCodeOverview(c *fiber.Ctx) error {
 			RemainCode: 0,
 		}
 	}
+	codeOverview.RemainCode = codeOverview.TotalCode - codeOverview.UsedCode
 	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "data": codeOverview})
 }
 
@@ -2016,13 +2051,15 @@ func UploadCodes(c *fiber.Ctx) error {
 	if !userPayload.CanAddCodes {
 		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, "You don't have permission to upload codes")
 	}
+	startTime := time.Now()
+	fmt.Println("Upload started at:", startTime.Format("2006-01-02 15:04:05"))
 	//TODO: check if user has right to upload code
 	file, err := c.FormFile("file")
 	if err != nil {
 		return utils.JsonErrorResponse(c, fiber.StatusBadRequest, "Please provide a valid file")
 	}
-	if file.Size > 1024*1024*50 {
-		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "File size should not exceed 50MB")
+	if file.Size > 1024*1024*100 {
+		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "File size should not exceed 100MB")
 	}
 	//save file
 	fileName := fmt.Sprintf("/app/uploads/%s", file.Filename)
@@ -2034,99 +2071,213 @@ func UploadCodes(c *fiber.Ctx) error {
 			ServiceName: config.ServiceName,
 		})
 	}
-	//open file
-	xlFile, err := excelize.OpenFile(fileName)
-	if err != nil {
-		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to open file", utils.Logger{
-			LogLevel:    utils.CRITICAL,
-			Message:     "UploadCodes: Unable to open file, error: " + err.Error(),
-			ServiceName: config.ServiceName,
-		})
-	}
-	rows, err := xlFile.GetRows("Sheet1")
-	if err != nil {
-		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to read file", utils.Logger{
-			LogLevel:    utils.CRITICAL,
-			Message:     "UploadCodes: Unable to read file, error: " + err.Error(),
-			ServiceName: config.ServiceName,
-		})
-	}
-	//validate file data
 	var codes []model.Code
-	for i, row := range rows {
-		if i == 0 {
-			continue
-		}
-		if len(row) != 1 {
-			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Invalid file format, each row should contain only one code")
-		}
-		codes = append(codes, model.Code{Code: row[0]})
-	}
-	//insert codes
-	tx, err := config.DB.Begin(ctx)
-	if err != nil {
-		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to start transaction", utils.Logger{
-			LogLevel:    utils.CRITICAL,
-			Message:     "UploadCodes: Unable to start transaction, error: " + err.Error(),
-			ServiceName: config.ServiceName,
-		})
-	}
-	defer func() {
+	//postgres limit max value to 65535, make sure to split the data into batches
+	var batches [][]model.Code
+	ext := filepath.Ext(file.Filename)
+	bCount := 0
+	skippedLines := 0
+	if ext == ".txt" {
+		//read file content and split by new line
+		// content, err := os.ReadFile(fileName)
+		// if err != nil {
+		// 	return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to read file", utils.Logger{
+		// 		LogLevel:    utils.CRITICAL,
+		// 		Message:     "UploadCodes: Unable to read file, error: " + err.Error(),
+		// 		ServiceName: config.ServiceName,
+		// 	})
+		// }
+		// lines := strings.Split(string(content), "\n")
+		// for _, line := range lines {
+		// 	//limit batch to 20000 because each value contains 3 params
+		// 	if bCount%20000 == 0 && bCount != 0 {
+		// 		batches = append(batches, codes)
+		// 		codes = []model.Code{}
+		// 	}
+		// 	bCount++
+		// 	//prevent reading more than 3 empty lines
+		// 	skippedLines++
+		// 	if skippedLines > 3 {
+		// 		break
+		// 	}
+		// 	line = strings.TrimSpace(line)
+		// 	if len(line) == 10 {
+		// 		codes = append(codes, model.Code{Code: line})
+		// 	} else {
+		// 		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Invalid code length, code should be 10 digits. code: "+line)
+		// 	}
+		// }
+
+		nFile, err := os.Open(fileName)
 		if err != nil {
-			tx.Rollback(ctx)
-		} else {
-			tx.Commit(ctx)
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to read file", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "UploadCodes: Unable to read file, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
 		}
+		defer nFile.Close()
+		scanner := bufio.NewScanner(nFile)
+		for scanner.Scan() {
+			//limit batch to 20000 because each value contains 3 params
+			if bCount%20000 == 0 && bCount != 0 {
+				batches = append(batches, codes)
+				codes = []model.Code{}
+			}
+			//prevent reading more than 3 empty lines
+			if skippedLines > 3 {
+				break
+			}
+			line := scanner.Text()
+			line = strings.TrimSpace(line)
+			if line == "" {
+				skippedLines++
+				continue // skip empty lines
+			}
+			bCount++
+			if len(line) == 10 {
+				codes = append(codes, model.Code{Code: line})
+			} else {
+				return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Invalid code length, code should be 10 digits. code: "+line)
+			}
+		}
+		if len(codes) > 0 {
+			batches = append(batches, codes)
+		}
+		fmt.Println("Batch preparing completed:", bCount, ", at: ", time.Now().Format("2006-01-02 15:04:05"), ", Took time:", time.Since(startTime))
+	} else if ext == ".xlsx" || ext == ".xls" {
+		//open file
+		xlFile, err := excelize.OpenFile(fileName)
+		if err != nil {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to open file", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "UploadCodes: Unable to open file, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+		rows, err := xlFile.GetRows("Sheet1")
+		if err != nil {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to read file", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "UploadCodes: Unable to read file, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+		//validate file data
+
+		for i, row := range rows {
+			if i == 0 {
+				continue
+			}
+			if len(row) != 1 {
+				return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Invalid file format, each row should contain only one code")
+			}
+			if bCount%20000 == 0 && bCount != 0 {
+				batches = append(batches, codes)
+				codes = []model.Code{}
+			}
+			if len(row[0]) == 0 {
+				skippedLines++
+				continue
+			}
+			bCount++
+			if skippedLines > 3 {
+				break
+			}
+			line := strings.TrimSpace(row[0])
+			if len(line) == 10 {
+				codes = append(codes, model.Code{Code: line})
+			} else {
+				return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Invalid code length, code should be 10 digits. code: "+line)
+			}
+		}
+		if len(codes) > 0 {
+			batches = append(batches, codes)
+		}
+		fmt.Println("Batch preparing using excel file completed:", bCount, ", at: ", time.Now().Format("2006-01-02 15:04:05"), ", Took time:", time.Since(startTime))
+	} else {
+		return c.Status(fiber.StatusUnsupportedMediaType).SendString("Unsupported file type")
+	}
+	//run upload process in background and notify user via SMS
+	ipAddress := c.IP()
+	webAgent := c.Get("User-Agent")
+	go func() {
+		//insert codes
+		tx, err := config.DB.Begin(ctx)
+		if err != nil {
+			//send sms notification on error
+			traceId := utils.LogMessage("error", "UploadCodes: Unable to start transaction, error: "+err.Error(), config.ServiceName)
+			go utils.SendSMS(config.DB, userPayload.Phone, "Codes uploaded failed, Unable to start transaction, error code: "+traceId,
+				viper.GetString("SENDER_ID"), config.ServiceName, "upload_codes", nil, config.Redis)
+			return
+		}
+		defer func() {
+			if err != nil {
+				tx.Rollback(ctx)
+			} else {
+				tx.Commit(ctx)
+			}
+		}()
+		rowsAffected := 0
+		for _, batch := range batches {
+			// Prepare the values and placeholders
+			valueStrings := make([]string, 0, len(batch))
+			valueArgs := make([]interface{}, 0, len(batch)*3)
+			for _, code := range batch {
+				code.Code = strings.ToUpper(code.Code)
+				valueStrings = append(valueStrings, fmt.Sprintf("(pgp_sym_encrypt($%d, $%d), digest($%d, 'sha256'), 'unused')",
+					len(valueArgs)+1,
+					len(valueArgs)+2,
+					len(valueArgs)+1))
+
+				valueArgs = append(valueArgs, code.Code, config.EncryptionKey)
+			}
+			// Construct the full SQL query
+			query := fmt.Sprintf("INSERT INTO codes (code, code_hash, status) VALUES %s",
+				strings.Join(valueStrings, ", "))
+			// Execute the multi-value insert
+			cmdTag, err := tx.Exec(context.Background(), query, valueArgs...)
+			if err != nil {
+				if ok, _ := utils.IsErrDuplicate(err); ok {
+					err = errors.New("some codes already exist")
+				} else {
+					traceId := utils.LogMessage("error", "UploadCodes: Unable to insert codes, error: "+err.Error(), config.ServiceName)
+					err = errors.New("Unable to insert codes, error code: " + traceId)
+				}
+			}
+			if err != nil {
+				//send sms notification on error
+				go utils.SendSMS(config.DB, userPayload.Phone, fmt.Sprintf("Codes uploaded failed, %s", err.Error()),
+					viper.GetString("SENDER_ID"), config.ServiceName, "upload_codes", nil, config.Redis)
+				return
+			}
+			rowsAffected += int(cmdTag.RowsAffected())
+			fmt.Println("Batch item completed affected rows:", rowsAffected, ", at: ", time.Now().Format("2006-01-02 15:04:05"))
+		}
+		_, err = config.DB.Exec(ctx, "REFRESH MATERIALIZED VIEW codes_count;")
+		if err != nil {
+			utils.LogMessage("error", "UploadCodes: Unable to refresh codes_count, error: "+err.Error(), config.ServiceName)
+			err = nil
+		}
+		fmt.Println("Upload completed, ", "Total rows:", bCount, "affected rows:", rowsAffected, ", at: ", time.Now().Format("2006-01-02 15:04:05"), ", Took time:", time.Since(startTime))
+		//send sms notification
+		go utils.SendSMS(config.DB, userPayload.Phone, fmt.Sprintf("Codes uploaded successfully, total: %d, time taken: %v", rowsAffected, time.Since(startTime)), viper.GetString("SENDER_ID"), config.ServiceName, "upload_codes", nil, config.Redis)
+		utils.RecordActivityLog(config.DB,
+			utils.ActivityLog{
+				UserID:       userPayload.Id,
+				ActivityType: "uploadCodes",
+				Description:  "Upload codes, total: " + fmt.Sprintf("%v", rowsAffected),
+				Status:       "success",
+				IPAddress:    ipAddress,
+				UserAgent:    webAgent,
+			},
+			config.ServiceName,
+			nil,
+		)
+		//remove file
+		go os.Remove(fileName)
 	}()
-	// Prepare the values and placeholders
-	valueStrings := make([]string, 0, len(codes))
-	valueArgs := make([]interface{}, 0, len(codes)*3)
-
-	for _, code := range codes {
-		code.Code = strings.ToUpper(code.Code)
-		if len(code.Code) != 10 {
-			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Invalid code length, code should be 10 digits")
-		} else if utils.ValidateString(code.Code, "") {
-			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Invalid code format, code should contain only digits and letter")
-		}
-		valueStrings = append(valueStrings, fmt.Sprintf("(pgp_sym_encrypt($%d, $%d), digest($%d, 'sha256'), 'unused')",
-			len(valueArgs)+1,
-			len(valueArgs)+2,
-			len(valueArgs)+1))
-
-		valueArgs = append(valueArgs, code.Code, config.EncryptionKey)
-	}
-	// Construct the full SQL query
-	query := fmt.Sprintf("INSERT INTO codes (code, code_hash, status) VALUES %s",
-		strings.Join(valueStrings, ", "))
-
-	// Execute the multi-value insert
-	cmdTag, err := tx.Exec(context.Background(), query, valueArgs...)
-	if err != nil {
-		if ok, _ := utils.IsErrDuplicate(err); ok {
-			return utils.JsonErrorResponse(c, fiber.StatusConflict, "Some codes already exist")
-		}
-		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to insert codes", utils.Logger{
-			LogLevel:    utils.CRITICAL,
-			Message:     "UploadCodes: Unable to insert codes, error: " + err.Error(),
-			ServiceName: config.ServiceName,
-		})
-	}
-	utils.RecordActivityLog(config.DB,
-		utils.ActivityLog{
-			UserID:       userPayload.Id,
-			ActivityType: "uploadCodes",
-			Description:  "Upload codes, total: " + fmt.Sprintf("%v", cmdTag.RowsAffected()),
-			Status:       "success",
-			IPAddress:    c.IP(),
-			UserAgent:    c.Get("User-Agent"),
-		},
-		config.ServiceName,
-		nil,
-	)
-	//remove file
-	go os.Remove(fileName)
-	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": fmt.Sprintf("%v Codes uploaded successfully", len(codes)), "count": cmdTag.RowsAffected()})
+	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": fmt.Sprintf("%v Codes will be uploaded in background and we will send you an SMS", bCount), "count": bCount})
 }
 func GetLogs(c *fiber.Ctx) error {
 	userPayload, err := utils.SecurePath(c, config.Redis)
@@ -2235,7 +2386,7 @@ func GetLogs(c *fiber.Ctx) error {
 // TODO: implement loop to distribute prize to users
 func DistributeMomoPrize() {
 	//fetch pending transaction
-	fmt.Println("Distributing momo prize")
+	// fmt.Println("Distributing momo prize")
 	rows, err := config.DB.Query(ctx, `SELECT t.id,t.amount,t.phone,t.mno,t.trx_id,t.transaction_type,p.code FROM transaction t
 	INNER JOIN prize p on p.id = t.prize_id WHERE t.status = 'PENDING' LIMIT 1000;`)
 	if err != nil {
@@ -2254,8 +2405,11 @@ func DistributeMomoPrize() {
 		refNo := ""
 		if transaction.Mno == "MTN" {
 			refNo, err = utils.MoMoCredit(transaction.Amount, transaction.Phone, transaction.TrxId, transaction.Code)
+		} else if transaction.Mno == "AIRTEL" {
+			refNo, err = utils.AirtelCredit(transaction.Amount, transaction.Phone, transaction.TrxId, transaction.Code, *config.Redis)
+		} else {
+			err = errors.New("invalid network operator")
 		}
-		fmt.Println("RefNo: ", refNo, "Error: ", err)
 		//TODO: add other network operators (Airtel)
 		if err != nil {
 			//update transaction status and error_message
@@ -2271,9 +2425,9 @@ func DistributeMomoPrize() {
 			}
 		}
 	}
-	fmt.Println("Distributing momo prize end, rows affected: ", a)
-	//re run the function after 10 seconds
-	time.Sleep(10 * time.Second)
+	// fmt.Println("Distributing momo prize end, rows affected: ", a)
+	//re run the function after 60 seconds
+	time.Sleep(60 * time.Second)
 	DistributeMomoPrize()
 }
 func GetSMSBalance(c *fiber.Ctx) error {
@@ -2400,6 +2554,7 @@ func GetTransactions(c *fiber.Ctx) error {
 	phone := c.Query("phone")
 	trxId := c.Query("trx_id")
 	refNo := c.Query("ref_no")
+	status := c.Query("status")
 	//add pagination
 	page := c.QueryInt("page", 1)
 	limit := c.QueryInt("limit", 20)
@@ -2407,7 +2562,9 @@ func GetTransactions(c *fiber.Ctx) error {
 		page = 1
 	}
 	offSet := (page - 1) * limit
-
+	if status == "COMPLETED" {
+		status = "SUCCESS"
+	}
 	err = utils.ValidateDateRanges(startDateStr, &endDateStr)
 	if err != nil {
 		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, err.Error())
@@ -2421,13 +2578,15 @@ func GetTransactions(c *fiber.Ctx) error {
 	}
 	args1 := []interface{}{}
 	// limitStr := fmt.Sprintf(" limit $%d offset $%d", a+1, a+2)
-	logsFilter, ii := utils.BuildQueryFilter(map[string]interface{}{
-		"t.created_at >= ": startDateStr,
-		"t.created_at <= ": endDateStr,
-		"t.phone":          phone,
-		"t.ref_no":         refNo,
-		"t.trx_id":         trxId,
-	},
+	logsFilter, ii := utils.BuildQueryFilter(
+		map[string]interface{}{
+			"t.created_at >= ": startDateStr,
+			"t.created_at <= ": endDateStr,
+			"t.phone":          phone,
+			"t.ref_no":         refNo,
+			"t.trx_id":         trxId,
+			"t.status":         status,
+		},
 		&args1,
 	)
 
@@ -2476,4 +2635,190 @@ func GetTransactions(c *fiber.Ctx) error {
 	}
 	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "data": transactions,
 		"pagination": fiber.Map{"page": page, "limit": limit, "total": totalTransaction}})
+}
+func ConfirmTransaction(c *fiber.Ctx) error {
+	userPayload, err := utils.SecurePath(c, config.Redis)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
+	}
+	transactionId, err := c.ParamsInt("transaction_id")
+	if err != nil || transactionId < 1 {
+		return utils.JsonErrorResponse(c, fiber.StatusForbidden, "Invalid transaction id provided")
+	}
+	responseStatus := 200
+	type FormData struct {
+		Password string `json:"password" binding:"required" validate:"required"`
+	}
+	formData := new(FormData)
+	if err := c.BodyParser(formData); err != nil {
+		responseStatus = 400
+		c.SendStatus(responseStatus)
+		return c.JSON(fiber.Map{"status": responseStatus, "message": "Please provide all required data", "details": err})
+	}
+	if err := Validate.Struct(formData); err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Provided data are not valid")
+	}
+	//check if password is correct
+	var fname, lname, userStatus string
+	err = config.DB.QueryRow(ctx,
+		`select u.fname,u.lname,u.status from users u  where id = $1 and password = crypt($2, password)`, userPayload.Id, formData.Password).
+		Scan(&fname, &lname, &userStatus)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			utils.LogMessage("critical", fmt.Sprintf("ConfirmTransaction: Unable to get user data for password verify, Email:%s, err:%v", userPayload.Email, err), "web-service")
+		}
+		responseStatus = 401
+		c.SendStatus(responseStatus)
+		return c.JSON(fiber.Map{"status": responseStatus, "message": "Invalid credentials"})
+	} else if userStatus != "OKAY" {
+		responseStatus = 401
+		c.SendStatus(responseStatus)
+		return c.JSON(fiber.Map{"status": responseStatus, "message": "Your account has been deactivated"})
+	}
+	//get existing status
+	var status, phone, trxId, prizeCode string
+	var refNo *string
+	var amount float64
+	err = config.DB.QueryRow(ctx, `select status,phone,trx_id,ref_no,amount,code from transaction t
+	INNER JOIN prize p on p.id = t.prize_id where t.id=$1`, transactionId).Scan(&status, &phone, &trxId, &refNo, &amount, &prizeCode)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Transaction data is invalid")
+		}
+		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to confirm transaction", utils.Logger{
+			LogLevel:    utils.CRITICAL,
+			Message:     "ConfirmTransaction: Unable to confirm transaction, error: " + err.Error(),
+			ServiceName: config.ServiceName,
+		})
+	}
+	if status != "WAITING" {
+		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Transaction status is already confirmed, refresh your page")
+	}
+	_, err = config.DB.Exec(ctx, `update transaction set status=$1 where id=$2`, "PENDING", transactionId)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to confirm transaction", utils.Logger{
+			LogLevel:    utils.CRITICAL,
+			Message:     "ConfirmTransaction: Unable to confirm transaction, error: " + err.Error(),
+			ServiceName: config.ServiceName,
+		})
+	}
+	utils.RecordActivityLog(config.DB,
+		utils.ActivityLog{
+			UserID:       userPayload.Id,
+			ActivityType: "confirmTransaction",
+			Description:  "confirm transaction of" + phone + ", TrxId: " + trxId + ", Prize: " + prizeCode,
+			Status:       "success",
+			IPAddress:    c.IP(),
+			UserAgent:    c.Get("User-Agent"),
+		},
+		config.ServiceName,
+		&map[string]interface{}{
+			"transaction_id": transactionId,
+			"status":         "WAITING",
+		},
+	)
+	return c.JSON(fiber.Map{"status": responseStatus, "message": fmt.Sprintf("Transaction of %s confirmed successfully", prizeCode)})
+}
+
+// confirmBulkTransaction which has WAITING status to PENDING
+func ConfirmBulkTransaction(c *fiber.Ctx) error {
+	userPayload, err := utils.SecurePath(c, config.Redis)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
+	}
+	type FormData struct {
+		TransactionIds []int  `json:"transaction_ids" binding:"required" validate:"required"`
+		Password       string `json:"password" binding:"required" validate:"required"`
+	}
+	responseStatus := 200
+	formData := new(FormData)
+	if err := c.BodyParser(formData); err != nil || len(formData.TransactionIds) == 0 {
+		responseStatus = 400
+		c.SendStatus(responseStatus)
+		return c.JSON(fiber.Map{"status": responseStatus, "message": "Please provide all required data", "details": err})
+	}
+	if err := Validate.Struct(formData); err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Provided data are not valid")
+	}
+	//check if password is correct
+	var fname, lname, userStatus string
+	err = config.DB.QueryRow(ctx,
+		`select u.fname,u.lname,u.status from users u  where id = $1 and password = crypt($2, password)`, userPayload.Id, formData.Password).
+		Scan(&fname, &lname, &userStatus)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			utils.LogMessage("critical", fmt.Sprintf("ConfirmBulkTransaction: Unable to get user data for password verify, Email:%s, err:%v", userPayload.Email, err), "web-service")
+		}
+		responseStatus = 401
+		c.SendStatus(responseStatus)
+		return c.JSON(fiber.Map{"status": responseStatus, "message": "Invalid credentials"})
+	} else if userStatus != "OKAY" {
+		responseStatus = 401
+		c.SendStatus(responseStatus)
+		return c.JSON(fiber.Map{"status": responseStatus, "message": "Your account has been deactivated"})
+	}
+	//get existing status
+	prizeCodes := []string{}
+	var status, phone, trxId, prizeCode string
+	var refNo *string
+	var amount float64
+	for _, transactionId := range formData.TransactionIds {
+		err = config.DB.QueryRow(ctx, `select status,phone,trx_id,ref_no,amount,code from transaction t
+		INNER JOIN prize p on p.id = t.prize_id where t.id=$1`, transactionId).Scan(&status, &phone, &trxId, &refNo, &amount, &prizeCode)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Transaction data is invalid")
+			}
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to confirm transaction", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "ConfirmBulkTransaction: Unable to confirm transaction, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+		prizeCodes = append(prizeCodes, prizeCode)
+		if status != "WAITING" {
+			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "One of the transaction status is already confirmed, refresh your page #"+prizeCode)
+		}
+	}
+	tx, err := config.DB.Begin(ctx)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to start transactions confirmation", utils.Logger{
+			LogLevel:    utils.CRITICAL,
+			Message:     "ConfirmBulkTransaction: Unable to start transaction confirmation, error: " + err.Error(),
+			ServiceName: config.ServiceName,
+		})
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback(ctx)
+		} else {
+			tx.Commit(ctx)
+		}
+	}()
+	for _, transaction := range formData.TransactionIds {
+		_, err = tx.Exec(ctx, `update transaction set status=$1 where id=$2`, "PENDING", transaction)
+		if err != nil {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to confirm transaction", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "ConfirmBulkTransaction: Unable to confirm transaction, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+	}
+	utils.RecordActivityLog(config.DB,
+		utils.ActivityLog{
+			UserID:       userPayload.Id,
+			ActivityType: "confirmBulkTransaction",
+			Description:  fmt.Sprintf("confirm bulk transaction, Count:%d, Codes: %s", len(prizeCodes), strings.Join(prizeCodes, ",")),
+			Status:       "success",
+			IPAddress:    c.IP(),
+			UserAgent:    c.Get("User-Agent"),
+		},
+		config.ServiceName,
+		&map[string]interface{}{
+			"transaction_ids": formData.TransactionIds,
+			"status":          "PENDING",
+		},
+	)
+	return c.JSON(fiber.Map{"status": responseStatus, "message": fmt.Sprintf("Transaction of %s confirmed successfully", prizeCode)})
 }

@@ -55,7 +55,7 @@
       "listen_address": ":8090"
     }
   },
-  "timeout": "3000ms",
+  "timeout": "10000ms",
   "cache_ttl": "300s",
   "output_encoding": "json",
   "port": 8080,
@@ -444,6 +444,7 @@
     },
     {
       "endpoint": "/api/v1/upload_codes",
+      "timeout": "30m",
       "method": "POST",
       "output_encoding": "no-op",
       "backend": [
@@ -965,6 +966,7 @@
         "phone",
         "trx_id",
         "ref_no",
+        "status",
         "transaction_type",
         "page",
         "limit"
@@ -986,6 +988,52 @@
           "encoding": "no-op",
           "sd": "static",
           "method": "GET",
+          "host": [
+            "http://web-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ],
+      "input_headers": [
+        "Authorization",
+        "Content-Type",
+        "User-Agent",
+        "Host"
+      ]
+    },
+    {
+      "endpoint": "/api/v1/confirm-trx/{transaction_id}",
+      "method": "POST",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/api/v1/confirm-trx/{transaction_id}",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "POST",
+          "host": [
+            "http://web-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ],
+      "input_headers": [
+        "Authorization",
+        "Content-Type",
+        "User-Agent",
+        "Host"
+      ]
+    },
+    {
+      "endpoint": "/api/v1/confirm-bulk-trx",
+      "method": "POST",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/api/v1/confirm-bulk-trx",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "POST",
           "host": [
             "http://web-service:9000"
           ],

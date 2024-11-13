@@ -7,6 +7,6 @@ spec:
     storage: 50Gi
   accessModes:
     - ReadWriteOnce
-  storageClassName: manual
+  # storageClassName: manual
   hostPath:
     path: /data/pg-pv1

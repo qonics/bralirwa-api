@@ -40,12 +40,12 @@ VALUES
 (2, 'Admin', 'User test', '078234234232', 'test@qonics.com', true, true, true, true, 1, FALSE, FALSE, 'en', 'NOT_AVAILABLE',
  '$2a$06$Q3Omh4QCXB7f2a5mTqlrAunZgm3c4K1MZYraLh/OXgK43j8CoHyPa', 'OKAY', 'NOT_AVAILABLE', NULL);`)
 	if err != nil {
+		fmt.Println("Error inserting user data", err)
 		//update password to
 		_, err = config.DB.Exec(ctx, `UPDATE users SET password=crypt($1, gen_salt('bf')) WHERE id=$2`, "P@as12.W0d", 2)
 		if err != nil {
 			fmt.Println("Error updating user password", err)
 		}
-		fmt.Println("Error inserting user data", err)
 	}
 	_, err = config.DB.Exec(ctx, `INSERT INTO users (fname, lname, phone, email, can_add_codes,can_trigger_draw,can_add_user,can_view_logs, department_id, email_verified, phone_verified, locale, avatar_url, password, status, address, operator)
 VALUES
@@ -102,6 +102,18 @@ VALUES
 		_, err = config.DB.Exec(ctx, `UPDATE entries SET created_at=$1 WHERE id=$2`, time.Now(), 1)
 		fmt.Println("Error inserting entries data", err)
 	}
+
+	// config.DB.Exec(ctx, `insert into transaction (id, prize_id, amount, phone, mno, customer_id, transaction_type, initiated_by,status) values
+	// (1, 1, 1000, 250785753712, 'MTN', 1,'CREDIT','SYSTEM','WAITING');`)
+	// config.DB.Exec(ctx, `insert into transaction (id, prize_id, amount, phone, mno, customer_id, transaction_type, initiated_by,status) values
+	// (2, 1, 1000, 250785753712, 'MTN', 1,'CREDIT','SYSTEM','WAITING');`)
+	// _, err = config.DB.Exec(ctx, `insert into transaction (id, prize_id, amount, phone, mno, customer_id, transaction_type, initiated_by,status) values
+	// (3, 1, 1000, 250785753712, 'MTN', 1,'CREDIT','SYSTEM','WAITING');`)
+	// if err != nil {
+	// 	fmt.Println("Error inserting transactions data", err)
+	// 	//update entry created_at to current date
+	// 	config.DB.Exec(ctx, `UPDATE transaction SET status='WAITING' WHERE id in (1,2)`)
+	// }
 	config.DB.Exec(ctx, `truncate draw CASCADE;`)
 	config.DB.Exec(ctx, `truncate prize CASCADE;`)
 }
@@ -1498,7 +1510,213 @@ func TestChangeUserStatus(t *testing.T) {
 
 		// Read the response body
 		body, _ := io.ReadAll(resp.Body)
-		fmt.Println(string(body))
+		// fmt.Println(string(body))
+		var result map[string]interface{}
+		json.Unmarshal(body, &result)
+		// Check each field
+		a.Equal(int(result["status"].(float64)), resp.StatusCode, test.description, "Status")
+		a.NotEmpty(result["message"], test.description, "Message")
+	}
+}
+
+var transaction_id int
+
+func TestGetTransactions(t *testing.T) {
+	access_token := createTestAccessToken()
+	// Setup Fiber app
+	app := fiber.New()
+	// Define the route
+	app.Get("/transactions", GetTransactions)
+
+	// Initialize the assert object
+	a := assert.New(t)
+
+	// Run the test
+	req := httptest.NewRequest("GET", "/transactions?status=WAITING", nil)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", access_token)
+
+	resp, _ := app.Test(req, -1)
+	// Check the status code
+	a.Equal(fiber.StatusOK, resp.StatusCode)
+
+	// Read the response body
+	body, _ := io.ReadAll(resp.Body)
+	// fmt.Println(string(body))
+	var result map[string]interface{}
+	json.Unmarshal(body, &result)
+	// Check each field
+	if resp.StatusCode == 200 {
+		data, ok := result["data"].([]interface{})
+		a.True(ok, "data should be an array")
+		dataRecord, ok := data[0].(map[string]interface{})
+		a.True(ok, "dataRecord should be a map")
+		a.NotEmpty(dataRecord["id"], "id")
+		a.NotEmpty(dataRecord["trx_id"], "trx_id")
+		a.NotEmpty(dataRecord["amount"], "amount")
+		a.NotEmpty(dataRecord["code"], "code")
+		a.NotEmpty(dataRecord["phone"], "phone")
+		a.NotEmpty(dataRecord["entry_id"], "entry_id")
+		a.NotEmpty(dataRecord["created_at"], "created_at")
+		transaction_id = int(dataRecord["id"].(float64))
+	}
+}
+
+// test ConfirmTransaction
+func TestConfirmTransaction(t *testing.T) {
+	token := createTestAccessToken()
+	// Setup Fiber app
+	app := fiber.New()
+	// Define the route
+	app.Post("/confirm-trx/:transaction_id", ConfirmTransaction)
+	// Test cases
+	tests := []struct {
+		description    string
+		transaction_id int
+		expectedCode   int
+		payload        map[string]any
+		expectedBody   string
+		expectedData   map[string]interface{} // expected data for detailed field checking
+	}{
+		{
+			description:    "success",
+			transaction_id: transaction_id,
+			payload: map[string]any{
+				"password": "P@as12.W0d2",
+			},
+			expectedCode: fiber.StatusOK,
+		},
+		{
+			description:    "Already confirmed",
+			transaction_id: transaction_id,
+			payload: map[string]any{
+				"password": "P@as12.W0d2",
+			},
+			expectedCode: fiber.StatusNotAcceptable,
+		},
+		{
+			description:    "invalid transaction",
+			transaction_id: -1,
+			payload: map[string]any{
+				"password": "P@as12.W0d",
+			},
+			expectedCode: fiber.StatusForbidden,
+		},
+		{
+			description:    "invalid password",
+			transaction_id: transaction_id,
+			payload: map[string]any{
+				"password": "P@as12.W0s",
+			},
+			expectedCode: fiber.StatusUnauthorized,
+		},
+		{
+			description:    "Transaction data is invalid",
+			transaction_id: 999999,
+			expectedCode:   fiber.StatusNotAcceptable,
+		},
+	}
+
+	// Initialize the assert object
+	a := assert.New(t)
+
+	// Run the tests
+	for _, test := range tests {
+		reqBody, _ := json.Marshal(test.payload)
+		req := httptest.NewRequest("POST", fmt.Sprintf("/confirm-trx/%d", test.transaction_id), bytes.NewReader(reqBody))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", token)
+
+		resp, _ := app.Test(req, -1)
+		// Check the status code
+		a.Equal(test.expectedCode, resp.StatusCode, test.description)
+
+		// Read the response body
+		body, _ := io.ReadAll(resp.Body)
+		var result map[string]interface{}
+		json.Unmarshal(body, &result)
+		// Check each field
+		a.Equal(int(result["status"].(float64)), resp.StatusCode, test.description, "Status")
+		a.NotEmpty(result["message"], test.description, "Message")
+	}
+}
+
+// test ConfirmBulkTransaction
+func TestConfirmBulkTransaction(t *testing.T) {
+	token := createTestAccessToken()
+	//update transaction status to WAITING
+	_, err := config.DB.Exec(ctx, "UPDATE transaction SET status = 'WAITING' WHERE id = $1", transaction_id)
+	if err != nil {
+		t.Error(err)
+	}
+	// Setup Fiber app
+	app := fiber.New()
+	// Define the route
+	app.Post("/confirm-bulk-trx", ConfirmBulkTransaction)
+	// Test cases
+	tests := []struct {
+		description  string
+		payload      map[string]any
+		expectedCode int
+		expectedBody string
+		expectedData map[string]interface{} // expected data for detailed field checking
+	}{
+		{
+			description: "success",
+			payload: map[string]any{
+				"transaction_ids": []int{transaction_id},
+				"password":        "P@as12.W0d2",
+			},
+			expectedCode: fiber.StatusOK,
+		},
+		{
+			description: "Already confirmed",
+			payload: map[string]any{
+				"transaction_ids": []int{transaction_id},
+				"password":        "P@as12.W0d2",
+			},
+			expectedCode: fiber.StatusNotAcceptable,
+		},
+		{
+			description: "Provided data are not valid",
+			payload: map[string]any{
+				"transaction_ids": []int{1, 0},
+				"password":        "P@as12.W0d2",
+			},
+			expectedCode: fiber.StatusNotAcceptable,
+		},
+		{
+			description: "invalid password",
+			payload: map[string]any{
+				"transaction_ids": []int{transaction_id},
+				"password":        "P@as12.W0s",
+			},
+			expectedCode: fiber.StatusUnauthorized,
+		},
+		{
+			description:  "Provided data are not valid",
+			payload:      nil,
+			expectedCode: fiber.StatusBadRequest,
+		},
+	}
+
+	// Initialize the assert object
+	a := assert.New(t)
+
+	// Run the tests
+	for _, test := range tests {
+		reqBody, _ := json.Marshal(test.payload)
+		req := httptest.NewRequest("POST", "/confirm-bulk-trx", bytes.NewReader(reqBody))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", token)
+
+		resp, _ := app.Test(req, -1)
+		// Check the status code
+		a.Equal(test.expectedCode, resp.StatusCode, test.description)
+
+		// Read the response body
+		body, _ := io.ReadAll(resp.Body)
+		// fmt.Println(string(body))
 		var result map[string]interface{}
 		json.Unmarshal(body, &result)
 		// Check each field

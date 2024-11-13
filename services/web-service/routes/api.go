@@ -2,6 +2,7 @@ package routes
 
 import (
 	"fmt"
+	"time"
 	"web-service/controller"
 
 	"github.com/goccy/go-json"
@@ -19,9 +20,12 @@ func InitRoutes() *fiber.App {
 	// v1.GET("/", controller.Index)
 	engine := html.New("/app/templates", ".html")
 	app := fiber.New(fiber.Config{
-		JSONEncoder: json.Marshal,
-		JSONDecoder: json.Unmarshal,
-		Views:       engine,
+		JSONEncoder:  json.Marshal,
+		JSONDecoder:  json.Unmarshal,
+		Views:        engine,
+		ReadTimeout:  time.Minute * 20,  // Increase read timeout (e.g., 5 minutes)
+		WriteTimeout: time.Minute * 20,  // Increase write timeout (e.g., 5 minutes)
+		BodyLimit:    100 * 1024 * 1024, // 50 MB limit
 	})
 	app.Use(recover.New())
 	// app.Use(logger.New())
@@ -75,5 +79,7 @@ func InitRoutes() *fiber.App {
 	v1.Get("/provinces", controller.GetProvinces)
 	v1.Get("/transactions", controller.GetTransactions)
 	v1.Get("/prize_type_space/:type_id", controller.GetPrizeTypeSpace)
+	v1.Post("/confirm-trx/:transaction_id", controller.ConfirmTransaction)
+	v1.Post("/confirm-bulk-trx/", controller.ConfirmBulkTransaction)
 	return app
 }

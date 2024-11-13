@@ -22,6 +22,7 @@ require (
 )
 
 require (
+	github.com/fiorix/go-smpp v0.0.0-20210403173735-2894b96e70ba
 	github.com/fsnotify/fsnotify v1.7.0 // indirect
 	github.com/gofiber/fiber v1.14.6
 	github.com/hashicorp/hcl v1.0.0 // indirect
