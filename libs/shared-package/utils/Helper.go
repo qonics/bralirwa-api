@@ -3,9 +3,16 @@ package utils
 import (
 	"bytes"
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -139,7 +146,7 @@ func LogMessage(logLevel string, message string, service string, forcedTraceId .
 	fmt.Println(message)
 	conn, err := grpc.Dial("logger-service:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		log.Fatal("Logger service not connected: " + err.Error())
+		log.Println("Logger service not connected: " + err.Error())
 	}
 	defer conn.Close()
 	client := proto.NewLoggerServiceClient(conn)
@@ -153,9 +160,9 @@ func LogMessage(logLevel string, message string, service string, forcedTraceId .
 	r, err := client.Log(ctx, &proto.LogRequest{LogLevel: logLevel, LogTime: time.Now().Format(time.DateTime),
 		ServiceName: service, Message: message, Identifier: traceId})
 	if err != nil {
-		log.Fatal("Logger service not responsed: " + err.Error())
+		log.Println("Logger service not responsed: " + err.Error())
 	}
-	log.Printf("Response: %s", r.GetResponse())
+	log.Printf("Response: %s \n", r.GetResponse())
 	return traceId
 }
 
@@ -342,8 +349,8 @@ func SecurePath(c *fiber.Ctx, redis *redis.Client) (*model.UserProfile, error) {
 	err := json.Unmarshal(client, &logger)
 	if err != nil {
 		c.SendStatus(responseStatus)
-		fmt.Println("authentication failed, invalid token: ", err.Error(), "Data:", client)
-		return nil, errors.New("authentication failed, invalid token." + err.Error())
+		// fmt.Println("authentication failed, invalid token: ", err.Error(), "Data:", client)
+		return nil, errors.New("authentication failed, invalid token")
 	}
 
 	redis.Expire(ctx, authHeader, time.Duration(SessionExpirationTime*time.Minute))
@@ -405,7 +412,11 @@ func GenerateRandomCapitalLetter(length int) string {
 }
 
 // validate mtn phone number and return names when it is valid, and error if any
-func ValidateMTNPhone(phoneNumber string) (string, error) {
+func ValidateMTNPhone(phoneNumber string, redis redis.Client) (string, error) {
+	names := redis.Get(ctx, "name_"+phoneNumber).Val()
+	if names != "" {
+		return names, nil
+	}
 	//send http json request
 	request, err := http.NewRequest("GET", fmt.Sprintf("%sapi/v1/momo/accountholder/information/%s", viper.GetString("MOMO_URL"), phoneNumber), nil)
 	if err != nil {
@@ -444,8 +455,113 @@ func ValidateMTNPhone(phoneNumber string) (string, error) {
 		LogMessage("critical", "ValidateMTNPhone: failed to validate phone number, system error, body: "+string(body), "ussd-service")
 		return "", errors.New("failed to validate phone number, system error")
 	}
-	names := result["firstname"].(string) + " " + result["lastname"].(string)
+	names = result["firstname"].(string) + " " + result["lastname"].(string)
+	//save names for 30 days
+	redis.Set(ctx, "name_"+phoneNumber, names, time.Duration(720*time.Hour))
 	return names, nil
+}
+func AirtelGetToken(redis redis.Client) (string, error) {
+	fmt.Println("getting airtel token")
+	reqBody, _ := json.Marshal(map[string]string{
+		"client_id":     viper.GetString("AIRTEL_ID"),
+		"client_secret": viper.GetString("AIRTEL_KEY"),
+		"grant_type":    "client_credentials",
+	})
+	//send http json request
+	request, err := http.NewRequest("POST", fmt.Sprintf("%s/auth/oauth2/token", viper.GetString("AIRTEL_URL")), bytes.NewBuffer([]byte(reqBody)))
+	if err != nil {
+		return "", err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	client := &http.Client{}
+	resp, err := client.Do(request)
+	if err != nil {
+		return "", err
+	}
+	// Read the response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	var result map[string]interface{}
+	err = json.Unmarshal(body, &result)
+	if err != nil {
+		return "", err
+	}
+	if res, ok := result["access_token"].(string); ok {
+		redis.Set(ctx, "airtel_token", res, time.Duration(170*time.Second))
+		fmt.Println("returning token: ", res)
+		return res, nil
+	} else {
+		LogMessage("critical", "AirtelGetToken: failed to get token, system error, body: "+string(body), "ussd-service")
+		return "", errors.New("failed to get token, system error")
+	}
+}
+func ValidateAirtelPhone(phoneNumber string, redis redis.Client) (string, error) {
+	//check if number is cached
+	phoneNumber = strings.Replace(phoneNumber, "+", "", -1)
+	phoneNumber = strings.Replace(phoneNumber, "250", "", -1)
+	names := redis.Get(ctx, "name_"+phoneNumber).Val()
+	if names != "" {
+		return names, nil
+	}
+	token := redis.Get(ctx, "airtel_token").Val()
+	var err error
+	if token == "" {
+		token, err = AirtelGetToken(redis)
+		fmt.Println("After fetching token: ", token, err)
+		if err != nil {
+			return "", err
+		}
+	}
+	fmt.Println("validating airtel phone")
+	phoneNumber = strings.Replace(phoneNumber, "+", "", -1)
+	phoneNumber = strings.Replace(phoneNumber, "250", "", -1)
+	//send http json request
+	request, err := http.NewRequest("GET", fmt.Sprintf("%s/standard/v1/users/%s", viper.GetString("AIRTEL_URL"), phoneNumber), nil)
+	if err != nil {
+		return "", err
+	}
+	request.Header.Set("Authorization", "Bearer "+token)
+	request.Header.Set("X-Country", "RW")
+	request.Header.Set("X-Currency", "RWF")
+	client := &http.Client{}
+	resp, err := client.Do(request)
+	if err != nil {
+		return "", err
+	}
+	// Read the response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	fmt.Println(string(body))
+	var result map[string]interface{}
+	err = json.Unmarshal(body, &result)
+	if err != nil {
+		return "", err
+	}
+	if res, ok := result["status"].(map[string]any); ok {
+		if res["code"].(string) == "200" {
+			data := result["data"].(map[string]any)
+			names := data["first_name"].(string) + " " + data["last_name"].(string)
+			//save names for 30 days
+			redis.Set(ctx, "name_"+phoneNumber, names, time.Duration(720*time.Hour))
+			return names, nil
+		} else {
+			error_message, ok := res["message"].(string)
+			if !ok {
+				return "", errors.New("failed to validate AIRTEL phone number, err: " + error_message)
+			}
+			if res["response_code"].(string) == "DP02200000000" {
+				return "", errors.New("phone_error_momo")
+			}
+			return "", errors.New("failed to validate AIRTEL phone number, err: " + result["message"].(string))
+		}
+	} else {
+		LogMessage("critical", "ValidateMTNPhone: failed to validate phone number, system error, body: "+string(body), "ussd-service")
+		return "", errors.New("failed to validate AIRTEL phone number, system error")
+	}
 }
 
 // send sms, return message_id on success and error if any
@@ -816,4 +932,241 @@ func MoMoCredit(amount int, phone string, trxId string, code string) (string, er
 		return "", errors.New("failed to credit winner, system error. Code: " + code)
 	}
 	return result["momoRef"].(string), nil
+}
+
+func AirtelCredit(amount int, phone string, trxId string, code string, redis redis.Client) (string, error) {
+	if IsTestMode {
+		return "TEST_SMS_ID", nil
+	}
+	token := redis.Get(ctx, "airtel_token").Val()
+	var err error
+	if token == "" {
+		token, err = AirtelGetToken(redis)
+		fmt.Println("After fetching token: ", token, err)
+		if err != nil {
+			return "", err
+		}
+	}
+	// TODO: set an amount to 20 for testing, it will be removed in production
+	pKey, err := LoadPublicKey(viper.GetString("AIRTEL_PUBLIC_KEY_V2"))
+	if err != nil {
+		return "", err
+	}
+	encryptedPin, err := EncryptData(viper.GetString("AIRTEL_PIN"), pKey)
+	if err != nil {
+		return "", err
+	}
+	fmt.Println("Encrypted pin: ", encryptedPin)
+	encryptedPin2, err := encryptWithPublicKey([]byte(viper.GetString("AIRTEL_PIN")), pKey)
+	if err != nil {
+		return "", err
+	}
+	fmt.Println("Encrypted pin2: ", encryptedPin2)
+	payload := map[string]interface{}{
+		"payee": map[string]interface{}{
+			"currency": "RWF",
+			"msisdn":   phone,
+		},
+		"pin":       encryptedPin2,
+		"amount":    20,
+		"reference": viper.GetString("MOMO_TRX_PREFIX") + trxId,
+		"transaction": map[string]any{
+			"id":     viper.GetString("MOMO_TRX_PREFIX") + trxId,
+			"amount": 20,
+			"type":   "B2C",
+		},
+	}
+	// payload := map[string]interface{}{
+	// 	"payee": map[string]interface{}{
+	// 		"currency": "RWF",
+	// 		"msisdn":   phone,
+	// 	},
+	// 	"pin":       encryptedPin2,
+	// 	"amount":    20,
+	// 	"reference": viper.GetString("MOMO_TRX_PREFIX") + trxId,
+	// 	"transaction": map[string]any{
+	// 		"id":     viper.GetString("MOMO_TRX_PREFIX") + trxId,
+	// 		"amount": 20,
+	// 		"type":   "B2C",
+	// 	},
+	// }
+	jsonData, _ := json.Marshal(payload)
+	// aesKeyIV, encryptedPayload, err := EncryptJSONPayload(jsonData, pKey)
+	fmt.Println("Raw payload: ", string(jsonData))
+	// fmt.Println("Encrypted payload: ", encryptedPayload)
+	// fmt.Println("Encrypted aesKeyIV: ", aesKeyIV)
+	// if err != nil {
+	// 	return "", err
+	// }
+	//send http json request
+	request, err := http.NewRequest("POST", fmt.Sprintf("%s/standard/v2/disbursements", viper.GetString("AIRTEL_URL")), bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", err
+	}
+	request.Header.Set("Authorization", "Bearer "+token)
+	request.Header.Set("X-Country", "RW")
+	request.Header.Set("X-Currency", "RWF")
+	// request.Header.Set("x-key", aesKeyIV)
+	// request.Header.Set("x-signature", encryptedPayload)
+	request.Header.Set("Content-Type", "application/json")
+	client := &http.Client{}
+	resp, err := client.Do(request)
+	if err != nil {
+		return "", err
+	}
+	// Read the response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	fmt.Println(string(body))
+	var result map[string]interface{}
+	err = json.Unmarshal(body, &result)
+	if err != nil {
+		return "", err
+	}
+	if res, ok := result["status"].(float64); ok {
+		if res != 200 {
+			error_message, ok := result["message"].(string)
+			if !ok {
+				return "", errors.New("failed to credit winner, err: " + error_message)
+			}
+			return "", errors.New("failed to credit winner, err: " + error_message)
+		}
+	} else {
+		LogMessage("critical", "MoMoCredit: failed to credit winner, system error, Code: "+code+" Phone: "+phone+" Amount: "+strconv.Itoa(amount)+" TrxId: "+trxId, "web-service")
+		return "", errors.New("failed to credit winner, system error. Code: " + code)
+	}
+	return result["momoRef"].(string), nil
+}
+
+// / LoadPublicKey loads an RSA public key from PEM format
+func LoadPublicKey(pemStr string) (*rsa.PublicKey, error) {
+	pemStr = "-----BEGIN PUBLIC KEY-----\n" + pemStr + "\n-----END PUBLIC KEY-----"
+	block, _ := pem.Decode([]byte(pemStr))
+	if block == nil {
+		return nil, fmt.Errorf("failed to parse PEM block")
+	}
+
+	pub, err := x509.ParsePKIXPublicKey(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse public key: %v", err)
+	}
+
+	rsaPub, ok := pub.(*rsa.PublicKey)
+	if !ok {
+		return nil, fmt.Errorf("not an RSA public key")
+	}
+
+	return rsaPub, nil
+}
+
+// func parsePublicKey(publicKeyPEM string) (*rsa.PublicKey, error) {
+// 	publicKeyPEM = "-----BEGIN PUBLIC KEY-----\n" + publicKeyPEM + "\n-----END PUBLIC KEY-----"
+// 	block, _ := pem.Decode([]byte(publicKeyPEM))
+// 	if block == nil {
+// 		return nil, fmt.Errorf("failed to parse PEM block containing the public key")
+// 	}
+
+// 	pub, err := x509.ParsePKIXPublicKey(block.Bytes)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+
+// 	rsaPublicKey, ok := pub.(*rsa.PublicKey)
+// 	if !ok {
+// 		return nil, fmt.Errorf("public key is not of the expected type *rsa.PublicKey")
+// 	}
+
+// 	return rsaPublicKey, nil
+// }
+
+// EncryptPIN encrypts a PIN using RSA-OAEP with SHA-256
+func EncryptData(data string, publicKey *rsa.PublicKey) (string, error) {
+	// Convert PIN to bytes
+	plaintext := []byte(data)
+
+	// Encrypt using RSA-OAEP with SHA-256
+	ciphertext, err := rsa.EncryptOAEP(
+		sha256.New(),
+		rand.Reader,
+		publicKey,
+		plaintext,
+		nil,
+	)
+	if err != nil {
+		return "", fmt.Errorf("encryption error: %v", err)
+	}
+	// Encode to base64 for transmission
+	return base64.StdEncoding.EncodeToString(ciphertext), nil
+}
+func encryptWithPublicKey(data []byte, publicKey *rsa.PublicKey) (string, error) {
+	ciphertext, err := rsa.EncryptPKCS1v15(rand.Reader,
+		publicKey,
+		data)
+	if err != nil {
+		return "", err
+	}
+	ciphertextStr := base64.StdEncoding.EncodeToString(ciphertext)
+	return ciphertextStr, nil
+}
+
+// EncryptJSONPayload encrypts a JSON payload using AES-256-GCM, and encrypts the AES key using RSA-OAEP.
+// returns the encrypted AES key and IV, and ciphertext as base64-encoded strings.
+func EncryptJSONPayload(plaintext []byte, publicKey *rsa.PublicKey) (string, string, error) {
+
+	// Generate a random 256-bit AES key
+	aesKey := make([]byte, 32)
+	_, err := rand.Read(aesKey)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to generate AES key: %v", err)
+	}
+
+	// Generate a random 96-bit AES IV
+	iv := make([]byte, 12)
+	_, err = rand.Read(iv)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to generate AES IV: %v", err)
+	}
+
+	// Encrypt the plaintext using AES-256-GCM
+	block, err := aes.NewCipher(aesKey)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to create AES cipher: %v", err)
+	}
+	aesgcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to create GCM: %v", err)
+	}
+	ciphertext := aesgcm.Seal(nil, iv, plaintext, nil)
+
+	// Encrypt the AES key using RSA-OAEP with SHA-256
+	encryptedAESKey, err := rsa.EncryptOAEP(
+		sha256.New(),
+		rand.Reader,
+		publicKey,
+		aesKey,
+		nil,
+	)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to encrypt AES key: %v", err)
+	}
+
+	// Encode the encrypted AES key and IV for the header
+	encryptedAESKeyStr := base64.StdEncoding.EncodeToString(encryptedAESKey)
+	encryptedIVStr := base64.StdEncoding.EncodeToString(iv)
+	headerValue := fmt.Sprintf("%s:%s", encryptedAESKeyStr, encryptedIVStr)
+
+	// Encode the ciphertext for the payload
+	ciphertextStr := base64.StdEncoding.EncodeToString(ciphertext)
+
+	return headerValue, ciphertextStr, nil
+}
+
+func SMPPSendSMS(phone string, message string, serviceName string) (string, error) {
+	//skip this if it is test
+	if IsTestMode {
+		return "TEST_SMS", nil
+	}
+	return "", nil
 }

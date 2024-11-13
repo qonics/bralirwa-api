@@ -55,7 +55,7 @@
       "listen_address": ":8090"
     }
   },
-  "timeout": "3000ms",
+  "timeout": "10000ms",
   "cache_ttl": "300s",
   "output_encoding": "json",
   "port": 8080,
@@ -444,6 +444,7 @@
     },
     {
       "endpoint": "/api/v1/upload_codes",
+      "timeout": "30m",
       "method": "POST",
       "output_encoding": "no-op",
       "backend": [

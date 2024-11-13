@@ -23,17 +23,17 @@ spec:
       containers:
         - env:
             - name: BACKEND_URL
-              value: https://bralirwa.testing.rw/api
+              value: https://bralirwalottery.rw/api
             - name: LOG_LEVEL
               value: debug
             - name: WEB_URL
-              value: https://bralirwa.testing.rw
+              value: https://bralirwalottery.rw
             - name: POSTGRES_DB_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: postgres.postgres.credentials.postgresql.acid.zalan.do  # Name of your secret
                   key: password  # Key of your secret
-          image: qonicsinc/lottery-ussd-service:1.0.12
+          image: qonicsinc/lottery-ussd-service:1.0.14
           name: ussd-service
           ports:
             - containerPort: 9000

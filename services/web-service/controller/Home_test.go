@@ -104,11 +104,11 @@ VALUES
 	}
 
 	// config.DB.Exec(ctx, `insert into transaction (id, prize_id, amount, phone, mno, customer_id, transaction_type, initiated_by,status) values
-	// (1, 1, 1000, 250785753712, 'MTN', 1,'DEBIT','SYSTEM','WAITING');`)
+	// (1, 1, 1000, 250785753712, 'MTN', 1,'CREDIT','SYSTEM','WAITING');`)
 	// config.DB.Exec(ctx, `insert into transaction (id, prize_id, amount, phone, mno, customer_id, transaction_type, initiated_by,status) values
-	// (2, 1, 1000, 250785753712, 'MTN', 1,'DEBIT','SYSTEM','WAITING');`)
+	// (2, 1, 1000, 250785753712, 'MTN', 1,'CREDIT','SYSTEM','WAITING');`)
 	// _, err = config.DB.Exec(ctx, `insert into transaction (id, prize_id, amount, phone, mno, customer_id, transaction_type, initiated_by,status) values
-	// (3, 1, 1000, 250785753712, 'MTN', 1,'DEBIT','SYSTEM','WAITING');`)
+	// (3, 1, 1000, 250785753712, 'MTN', 1,'CREDIT','SYSTEM','WAITING');`)
 	// if err != nil {
 	// 	fmt.Println("Error inserting transactions data", err)
 	// 	//update entry created_at to current date

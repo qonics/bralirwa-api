@@ -7,7 +7,7 @@ spec:
   volume:
     size: 50Gi
     storageClass: manual  # Add this line
-  numberOfInstances: 2
+  numberOfInstances: 3
   users:
     postgres:  # database owner
     - superuser
@@ -20,7 +20,16 @@ spec:
     bar: {}
   postgresql:
     version: "16"
+  resources:
+    requests:
+      cpu: "2"       # Keep the same or increase based on your needs
+      memory: "4Gi"    # Keep the same or increase based on your needs
+    limits:
+      cpu: "2"           # Set the new CPU limit (2 CPUs)
+      memory: "6Gi"
   patroni:
     pg_hba:
     - host all all 0.0.0.0/0 md5  # Allow connections from any IP address using md5 encryption
     - local all postgres md5
+    - host replication standby all md5
+    - local replication standby trust  # New rule to allow local replication for the standby user

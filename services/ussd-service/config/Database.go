@@ -30,7 +30,7 @@ func ConnectDb() {
 	if err != nil {
 		log.Fatalf("Failed to create pgxpool config: %v", err)
 	}
-	dbConfig.MaxConns = 4
+	dbConfig.MaxConns = 20
 	dbConfig.MinConns = 0
 	dbConfig.MaxConnLifetime = time.Hour
 	dbConfig.MaxConnIdleTime = 30 * time.Minute

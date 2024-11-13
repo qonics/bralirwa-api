@@ -23,19 +23,19 @@ spec:
       containers:
         - env:
             - name: BACKEND_URL
-              value: https://bralirwa.testing.rw/api
+              value: https://bralirwalottery.rw/api
             - name: LOG_LEVEL
               value: debug
             - name: WEB_URL
-              value: https://bralirwa.testing.rw
+              value: https://bralirwalottery.rw
             - name: MOMO_TRX_PREFIX
-              value: PT
+              value: ""
             - name: POSTGRES_DB_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: postgres.postgres.credentials.postgresql.acid.zalan.do  # Name of your secret
                   key: password  # Key of your secret
-          image: qonicsinc/lottery-web-service:1.0.11
+          image: qonicsinc/lottery-web-service:1.0.15
           name: web-service
       restartPolicy: Always
       imagePullSecrets:

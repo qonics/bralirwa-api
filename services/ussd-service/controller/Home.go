@@ -157,7 +157,15 @@ func processUSSD(input *string, phone string, sessionId string, networkOperator 
 	}
 	if isNewRequest && USSDdata.StepId == "welcome" {
 		//check if phone number is valid
-		names, err := utils.ValidateMTNPhone(phone)
+		names := ""
+		var err error
+		if networkOperator == "MTN" {
+			names, err = utils.ValidateMTNPhone(phone, *config.Redis)
+		} else if networkOperator == "AIRTEL" {
+			names, err = utils.ValidateAirtelPhone(phone, *config.Redis)
+		} else {
+			return "", fmt.Errorf("invalid network operator"), true
+		}
 		if err != nil {
 			//load localizer
 			localizer = loadLocalizer(lang)
@@ -437,7 +445,7 @@ func setUssdData(ussdData model.USSDData) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println("setUssdDataItem 1: ", string(jsonData), ussdData.Id)
+	// fmt.Println("setUssdDataItem 1: ", string(jsonData), ussdData.Id)
 	return config.Redis.Set(ctx, "ussd:"+ussdData.Id, jsonData, 120*time.Second).Err()
 }
 func setUssdDataItem(sessionId string, itemKey string, value interface{}) error {
@@ -655,6 +663,9 @@ func completeRegistration(args ...interface{}) string {
 	if err != nil {
 		return err.Error()
 	}
+	go func() {
+		config.DB.Exec(ctx, "REFRESH MATERIALIZED VIEW codes_count")
+	}()
 	go utils.SendSMS(config.DB, args[3].(string), sms_message, viper.GetString("SENDER_ID"), config.ServiceName, message_type, &customerId, config.Redis)
 	return "success_entry"
 }
@@ -699,6 +710,9 @@ func entrySaveCode(args ...interface{}) string {
 	if err != nil {
 		return err.Error()
 	}
+	go func() {
+		config.DB.Exec(ctx, "REFRESH MATERIALIZED VIEW codes_count")
+	}()
 	go utils.SendSMS(config.DB, args[3].(string), sms_message, viper.GetString("SENDER_ID"), config.ServiceName, message_type, USSDdata.CustomerId, config.Redis)
 	return ""
 }
@@ -764,7 +778,7 @@ func dailyPrizeWinning(entryId int, code string, lang string) (string, string, b
 			if err != nil {
 				utils.LogMessage("error", "entrySaveCode: #distribute_prize fetch customer MNO failed: err:"+err.Error(), "ussd-service")
 			} else {
-				_, err = config.DB.Exec(ctx, `insert into transaction (prize_id, amount, phone, mno, customer_id, transaction_type, initiated_by,status) values ($1, $2, $3, $4, $5,'DEBIT','SYSTEM','PENDING')`,
+				_, err = config.DB.Exec(ctx, `insert into transaction (prize_id, amount, phone, mno, customer_id, transaction_type, initiated_by,status) values ($1, $2, $3, $4, $5,'CREDIT','SYSTEM','PENDING')`,
 					prizeId, prizeType.Value, USSDdata.MSISDN, mno, USSDdata.CustomerId)
 				if err != nil {
 					utils.LogMessage("error", "entrySaveCode: #distribute_prize insert transaction failed: err:"+err.Error(), "ussd-service")

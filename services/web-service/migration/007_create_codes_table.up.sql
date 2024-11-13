@@ -12,3 +12,5 @@ CREATE TABLE IF NOT EXISTS codes (
 -- Index for fast lookup on code
 CREATE INDEX idx_codes_code ON codes(code_hash);
 CREATE INDEX idx_codes_prize_type_id ON codes(prize_type_id);
+CREATE MATERIALIZED VIEW IF NOT EXISTS codes_count AS SELECT count(id) as total,
+    count(id) FILTER (WHERE status = 'used') as used_count FROM codes;
