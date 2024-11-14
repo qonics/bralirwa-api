@@ -5,6 +5,7 @@ go 1.22.2
 replace libs/shared-package => ../../libs/shared-package
 
 require (
+	github.com/fiorix/go-smpp v0.0.0-20210403173735-2894b96e70ba
 	github.com/go-playground/validator/v10 v10.22.1
 	github.com/go-redis/redis/v8 v8.11.4
 	github.com/goccy/go-json v0.10.2
@@ -42,6 +43,7 @@ require (
 )
 
 require (
+	github.com/ajankovic/smpp v0.0.0-20191203230920-1db50388714e
 	github.com/andybalholm/brotli v1.0.5 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect

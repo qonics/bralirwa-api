@@ -61,7 +61,7 @@
   "port": 8080,
   "endpoints": [
     {
-      "endpoint": "/ws",
+      "endpoint": "/api/v1/test-sms/{mno}/{phone}",
       "method": "GET",
       "output_encoding": "no-op",
       "input_headers": [
@@ -72,12 +72,12 @@
       ],
       "backend": [
         {
-          "url_pattern": "/ws",
+          "url_pattern": "/api/v1/test-sms/{mno}/{phone}",
           "encoding": "no-op",
           "sd": "static",
           "method": "GET",
           "host": [
-            "http://common-service:9000"
+            "http://web-service:9000"
           ],
           "disable_host_sanitize": true
         }

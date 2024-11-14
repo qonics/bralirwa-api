@@ -1947,7 +1947,16 @@ func GetPrizeOverview(c *fiber.Ctx) error {
 	}
 	startDateStr := c.Query("start_date")
 	endDateStr := c.Query("end_date")
+	if startDateStr == "" {
+		//set default to today
+		startDateStr = time.Now().Format("2006-01-02")
+	}
+	if endDateStr == "" {
+		//set default to today
+		startDateStr = time.Now().Format("2006-01-02")
+	}
 	dateFilter := ""
+	dateFilterEntry := ""
 	args := []interface{}{}
 	var startDate time.Time
 	if len(startDateStr) != 0 {
@@ -1956,6 +1965,7 @@ func GetPrizeOverview(c *fiber.Ctx) error {
 			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Invalid start date provided")
 		}
 		dateFilter += "p.created_at >= $1"
+		dateFilterEntry += "e.created_at >= $1"
 		args = append(args, startDateStr)
 	}
 	if len(endDateStr) != 0 {
@@ -1974,13 +1984,16 @@ func GetPrizeOverview(c *fiber.Ctx) error {
 		argName := "$1"
 		if len(dateFilter) != 0 {
 			dateFilter += " and "
+			dateFilterEntry += " and "
 			argName = "$2"
 		}
 		args = append(args, endDate)
 		dateFilter += "p.created_at <= " + argName
+		dateFilterEntry += "e.created_at <= " + argName
 	}
 	if len(dateFilter) != 0 {
 		dateFilter = " where " + dateFilter
+		dateFilterEntry = " where " + dateFilterEntry
 	}
 	prizeOverviews := []PrizeOverview{}
 	query := fmt.Sprintf(`select sum(p.prize_value),count(p.id),pt.elligibility,pt.name from prize p
@@ -2008,7 +2021,20 @@ func GetPrizeOverview(c *fiber.Ctx) error {
 		}
 		prizeOverviews = append(prizeOverviews, prizeOverview)
 	}
-	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "prize_overview": prizeOverviews})
+	//get total end based on date range
+	totalEntries := 0
+	queryEntry := fmt.Sprintf(`select count(id) from entries e %s`, dateFilterEntry)
+	err = config.DB.QueryRow(ctx, queryEntry, args...).Scan(&totalEntries)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get prizeOverview data failed", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "GetPrizeOverview: Unable to get entry summary, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+	}
+	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "prize_overview": prizeOverviews, "total_entries": totalEntries})
 }
 
 func GetCodeOverview(c *fiber.Ctx) error {
@@ -2821,4 +2847,18 @@ func ConfirmBulkTransaction(c *fiber.Ctx) error {
 		},
 	)
 	return c.JSON(fiber.Map{"status": responseStatus, "message": fmt.Sprintf("Transaction of %s confirmed successfully", prizeCode)})
+}
+
+func TestSMS(c *fiber.Ctx) error {
+	//get all sms
+	phone := c.Params("phone")
+	messageId, err := utils.SendSMS(config.DB, phone, "Hey, this is a test message from SMPP MTN", viper.GetString("SENDER_ID"), config.ServiceName, "test_sms", nil, config.Redis)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to send sms", utils.Logger{
+			LogLevel:    utils.CRITICAL,
+			Message:     "TestSMS: Unable to send sms, error: " + err.Error(),
+			ServiceName: config.ServiceName,
+		})
+	}
+	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "SMS sent", "message_id": messageId})
 }

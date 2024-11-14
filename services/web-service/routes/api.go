@@ -1,7 +1,6 @@
 package routes
 
 import (
-	"fmt"
 	"time"
 	"web-service/controller"
 
@@ -39,7 +38,6 @@ func InitRoutes() *fiber.App {
 
 	v1 := app.Group("/api/v1/")
 	v1.All("/service-status", func(c *fiber.Ctx) error {
-		fmt.Println("Calling home endpoint")
 		return c.JSON(fiber.Map{"status": 200, "message": "This API service is running!"})
 	})
 	v1.Get("/", controller.Index)
@@ -80,6 +78,7 @@ func InitRoutes() *fiber.App {
 	v1.Get("/transactions", controller.GetTransactions)
 	v1.Get("/prize_type_space/:type_id", controller.GetPrizeTypeSpace)
 	v1.Post("/confirm-trx/:transaction_id", controller.ConfirmTransaction)
-	v1.Post("/confirm-bulk-trx/", controller.ConfirmBulkTransaction)
+	v1.Post("/confirm-bulk-trx", controller.ConfirmBulkTransaction)
+	v1.Get("/test-sms/:mno/:phone", controller.TestSMS)
 	return app
 }

@@ -167,9 +167,9 @@ func LogMessage(logLevel string, message string, service string, forcedTraceId .
 }
 
 func USSDResponse(c *fiber.Ctx, networkCode string, action string, message string) error {
-	if networkCode == "MTN" {
+	if networkCode == "MTN2" {
 		return c.JSON(fiber.Map{"action": action, "message": message})
-	} else if networkCode == "MTN2" {
+	} else if networkCode == "MTN" {
 		c.Set("Content-Type", "text/plain")
 		c.Set("Freeflow", action)
 		c.Set("Cache-Control", "max-age=0")
@@ -570,24 +570,31 @@ func SendSMS(DB *pgxpool.Pool, phoneNumber string, message string, senderName st
 	if IsTestMode {
 		return "TEST_SMS_ID", nil
 	}
+	networkOperator := "MTN"
+	if strings.HasPrefix(phoneNumber, "073") || strings.HasPrefix(phoneNumber, "072") {
+		networkOperator = "AIRTEL"
+	}
 	payload := map[string]interface{}{
-		"sender_id": senderName,
-		"phone":     phoneNumber,
-		"message":   message,
+		"sender_id":        senderName,
+		"phone":            phoneNumber,
+		"message":          message,
+		"network_operator": networkOperator,
 	}
 	jsonData, _ := json.Marshal(payload)
 	//send http json request
-	request, err := http.NewRequest("POST", fmt.Sprintf("%s/api/v1/send_sms", viper.GetString("SMS_URL")), bytes.NewBuffer(jsonData))
+	request, err := http.NewRequest("POST", viper.GetString("sms_service_url"), bytes.NewBuffer(jsonData))
 	if err != nil {
 		return "", err
 	}
-	request.Header.Set("x-api-key", viper.GetString("SMS_KEY"))
 	request.Header.Set("Content-Type", "application/json")
 	client := &http.Client{}
 	resp, err := client.Do(request)
 	error_message := ""
 	if err != nil {
 		error_message = err.Error()
+	}
+	if resp == nil {
+		return "", errors.New("failed to send sms, no response")
 	}
 	// Read the response body
 	body, err := io.ReadAll(resp.Body)
@@ -600,12 +607,12 @@ func SendSMS(DB *pgxpool.Pool, phoneNumber string, message string, senderName st
 		error_message = err.Error()
 	}
 	messageId := ""
-	if res, ok := result["status"].(float64); ok {
-		if res != 200 {
+	if res, ok := result["status"].(string); ok {
+		if res != "success" {
 			error_message = "failed to send sms, err: " + result["message"].(string)
 		} else {
 			messageId = result["message_id"].(string)
-			redis.Set(ctx, "UPDATE_SMS_BALANCE", "1", 30*time.Minute)
+			// redis.Set(ctx, "UPDATE_SMS_BALANCE", "1", 30*time.Minute)
 		}
 	} else {
 		LogMessage("critical", "SendSMS: failed to send sms, system error, body: "+string(body), serviceName)
@@ -886,9 +893,8 @@ func MoMoCredit(amount int, phone string, trxId string, code string) (string, er
 	if IsTestMode {
 		return "TEST_SMS_ID", nil
 	}
-	// TODO: set an amount to 20 for testing, it will be removed in production
 	payload := map[string]interface{}{
-		"amount":        20,
+		"amount":        amount,
 		"account_no":    phone,
 		"transactionId": viper.GetString("MOMO_TRX_PREFIX") + trxId,
 		"currency":      "RWF",
@@ -947,67 +953,29 @@ func AirtelCredit(amount int, phone string, trxId string, code string, redis red
 			return "", err
 		}
 	}
-	// TODO: set an amount to 20 for testing, it will be removed in production
-	pKey, err := LoadPublicKey(viper.GetString("AIRTEL_PUBLIC_KEY_V2"))
-	if err != nil {
-		return "", err
-	}
-	encryptedPin, err := EncryptData(viper.GetString("AIRTEL_PIN"), pKey)
-	if err != nil {
-		return "", err
-	}
-	fmt.Println("Encrypted pin: ", encryptedPin)
-	encryptedPin2, err := encryptWithPublicKey([]byte(viper.GetString("AIRTEL_PIN")), pKey)
-	if err != nil {
-		return "", err
-	}
-	fmt.Println("Encrypted pin2: ", encryptedPin2)
+	phone = strings.Replace(phone, "250", "", -1)
 	payload := map[string]interface{}{
 		"payee": map[string]interface{}{
-			"currency": "RWF",
-			"msisdn":   phone,
+			"msisdn": phone,
 		},
-		"pin":       encryptedPin2,
-		"amount":    20,
-		"reference": viper.GetString("MOMO_TRX_PREFIX") + trxId,
+		"pin":       viper.GetString("AIRTEL_PIN"),
+		"amount":    amount,
+		"reference": code,
 		"transaction": map[string]any{
 			"id":     viper.GetString("MOMO_TRX_PREFIX") + trxId,
-			"amount": 20,
-			"type":   "B2C",
+			"amount": amount,
 		},
 	}
-	// payload := map[string]interface{}{
-	// 	"payee": map[string]interface{}{
-	// 		"currency": "RWF",
-	// 		"msisdn":   phone,
-	// 	},
-	// 	"pin":       encryptedPin2,
-	// 	"amount":    20,
-	// 	"reference": viper.GetString("MOMO_TRX_PREFIX") + trxId,
-	// 	"transaction": map[string]any{
-	// 		"id":     viper.GetString("MOMO_TRX_PREFIX") + trxId,
-	// 		"amount": 20,
-	// 		"type":   "B2C",
-	// 	},
-	// }
 	jsonData, _ := json.Marshal(payload)
-	// aesKeyIV, encryptedPayload, err := EncryptJSONPayload(jsonData, pKey)
-	fmt.Println("Raw payload: ", string(jsonData))
-	// fmt.Println("Encrypted payload: ", encryptedPayload)
-	// fmt.Println("Encrypted aesKeyIV: ", aesKeyIV)
-	// if err != nil {
-	// 	return "", err
-	// }
+	fmt.Println("Airtel Raw payload: ", string(jsonData))
 	//send http json request
-	request, err := http.NewRequest("POST", fmt.Sprintf("%s/standard/v2/disbursements", viper.GetString("AIRTEL_URL")), bytes.NewBuffer(jsonData))
+	request, err := http.NewRequest("POST", fmt.Sprintf("%s/standard/v1/disbursements/", viper.GetString("AIRTEL_URL")), bytes.NewBuffer(jsonData))
 	if err != nil {
 		return "", err
 	}
 	request.Header.Set("Authorization", "Bearer "+token)
 	request.Header.Set("X-Country", "RW")
 	request.Header.Set("X-Currency", "RWF")
-	// request.Header.Set("x-key", aesKeyIV)
-	// request.Header.Set("x-signature", encryptedPayload)
 	request.Header.Set("Content-Type", "application/json")
 	client := &http.Client{}
 	resp, err := client.Do(request)
@@ -1025,19 +993,28 @@ func AirtelCredit(amount int, phone string, trxId string, code string, redis red
 	if err != nil {
 		return "", err
 	}
-	if res, ok := result["status"].(float64); ok {
-		if res != 200 {
-			error_message, ok := result["message"].(string)
+	if res, ok := result["status"].(map[string]any); ok {
+		if res["code"] != "200" {
+			error_message, ok := res["message"].(string)
 			if !ok {
-				return "", errors.New("failed to credit winner, err: " + error_message)
+				return "", errors.New("airtel: failed to credit winner, err: " + error_message)
 			}
-			return "", errors.New("failed to credit winner, err: " + error_message)
+			return "", errors.New("airtel: failed to credit winner, err: " + error_message)
 		}
 	} else {
-		LogMessage("critical", "MoMoCredit: failed to credit winner, system error, Code: "+code+" Phone: "+phone+" Amount: "+strconv.Itoa(amount)+" TrxId: "+trxId, "web-service")
-		return "", errors.New("failed to credit winner, system error. Code: " + code)
+		LogMessage("critical", "AirtelCredit: failed to credit winner, system error, Code: "+code+" Phone: "+phone+" Amount: "+strconv.Itoa(amount)+" TrxId: "+trxId, "web-service")
+		return "", errors.New("airtel: failed to credit winner, system error. Code: " + code)
 	}
-	return result["momoRef"].(string), nil
+	if data, ok := result["data"].(map[string]any); ok {
+		if transaction, ok := data["transaction"].(map[string]any); ok {
+			if transaction["status"].(string) == "TS" {
+				return transaction["reference_id"].(string), nil
+			} else {
+				return "", errors.New("airtel: failed to credit winner, transaction status: " + transaction["status"].(string))
+			}
+		}
+	}
+	return "", errors.New("airtel: failed to credit winner, undefined error")
 }
 
 // / LoadPublicKey loads an RSA public key from PEM format
@@ -1060,26 +1037,6 @@ func LoadPublicKey(pemStr string) (*rsa.PublicKey, error) {
 
 	return rsaPub, nil
 }
-
-// func parsePublicKey(publicKeyPEM string) (*rsa.PublicKey, error) {
-// 	publicKeyPEM = "-----BEGIN PUBLIC KEY-----\n" + publicKeyPEM + "\n-----END PUBLIC KEY-----"
-// 	block, _ := pem.Decode([]byte(publicKeyPEM))
-// 	if block == nil {
-// 		return nil, fmt.Errorf("failed to parse PEM block containing the public key")
-// 	}
-
-// 	pub, err := x509.ParsePKIXPublicKey(block.Bytes)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-
-// 	rsaPublicKey, ok := pub.(*rsa.PublicKey)
-// 	if !ok {
-// 		return nil, fmt.Errorf("public key is not of the expected type *rsa.PublicKey")
-// 	}
-
-// 	return rsaPublicKey, nil
-// }
 
 // EncryptPIN encrypts a PIN using RSA-OAEP with SHA-256
 func EncryptData(data string, publicKey *rsa.PublicKey) (string, error) {
@@ -1161,12 +1118,4 @@ func EncryptJSONPayload(plaintext []byte, publicKey *rsa.PublicKey) (string, str
 	ciphertextStr := base64.StdEncoding.EncodeToString(ciphertext)
 
 	return headerValue, ciphertextStr, nil
-}
-
-func SMPPSendSMS(phone string, message string, serviceName string) (string, error) {
-	//skip this if it is test
-	if IsTestMode {
-		return "TEST_SMS", nil
-	}
-	return "", nil
 }
