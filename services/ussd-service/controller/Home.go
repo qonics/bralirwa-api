@@ -739,7 +739,7 @@ func dailyPrizeWinning(entryId int, code string, lang string) (string, string, b
 		//try to get daily prize and check if there is a remaining room (based on elligibility and distributed prizes)
 		//get daily prize typey
 		err := config.DB.QueryRow(ctx, `select pt.id, pt.name,(pt.elligibility - count(p.id)) as remaining_place,pt.value,pt.status,pt.distribution_type from prize_type pt
-		LEFT JOIN prize p on p.prize_type_id = pt.id where pt.period = 'DAILY' and pt.trigger_by_system = true and pt.status='OKAY' group by pt.id, p.prize_type_id order by random() limit 1`).
+		LEFT JOIN prize p on p.prize_type_id = pt.id and DATE(p.created_at) = CURRENT_DATE where pt.period = 'DAILY' and pt.trigger_by_system = true and pt.status='OKAY' group by pt.id, p.prize_type_id order by random() limit 1`).
 			Scan(&prizeType.Id, &prizeType.Name, &prizeType.RemainingPlace, &prizeType.Value, &prizeType.Status, &prizeType.DistrutionType)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
