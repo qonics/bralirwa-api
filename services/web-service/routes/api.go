@@ -50,6 +50,7 @@ func InitRoutes() *fiber.App {
 	v1.Post("/prize_category", controller.CreatePrizeCategory)
 	v1.Post("/prize_type", controller.CreatePrizeType)
 	v1.Post("/user", controller.AddUser)
+	v1.Post("/user/:userId", controller.EditUser)
 	v1.Get("/users", controller.GetUsers)
 	v1.Get("/entries", controller.GetEntries)
 	v1.Get("/draws", controller.GetDraws)
@@ -79,6 +80,8 @@ func InitRoutes() *fiber.App {
 	v1.Get("/prize_type_space/:type_id", controller.GetPrizeTypeSpace)
 	v1.Post("/confirm-trx/:transaction_id", controller.ConfirmTransaction)
 	v1.Post("/confirm-bulk-trx", controller.ConfirmBulkTransaction)
+	v1.Post("/resend-bulk-trx", controller.ResendBulkTransaction)
+	v1.Post("/resend-trx/:transaction_id", controller.ResendTransaction)
 	v1.Get("/test-sms/:mno/:phone", controller.TestSMS)
 	return app
 }
