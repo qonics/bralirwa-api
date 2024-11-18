@@ -37,6 +37,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nicksnyder/go-i18n/v2/i18n"
 	"github.com/spf13/viper"
+	"github.com/xuri/excelize/v2"
 	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -570,6 +571,7 @@ func SendSMS(DB *pgxpool.Pool, phoneNumber string, message string, senderName st
 	if IsTestMode {
 		return "TEST_SMS_ID", nil
 	}
+	fmt.Println("sending sms to ", phoneNumber)
 	networkOperator := "MTN"
 	if strings.HasPrefix(phoneNumber, "073") || strings.HasPrefix(phoneNumber, "072") {
 		networkOperator = "AIRTEL"
@@ -594,6 +596,8 @@ func SendSMS(DB *pgxpool.Pool, phoneNumber string, message string, senderName st
 		error_message = err.Error()
 	}
 	if resp == nil {
+		fmt.Println("failed to send sms, no response, err:", error_message, "body:", string(jsonData))
+		LogMessage("critical", "SendSMS: ailed to send sms, no response", serviceName)
 		return "", errors.New("failed to send sms, no response")
 	}
 	// Read the response body
@@ -820,15 +824,15 @@ func RecordActivityLog(db *pgxpool.Pool, log ActivityLog, serviceName string, ex
 func getOdds(hour int) int {
 	switch {
 	case hour >= 0 && hour < 7:
-		return 30
+		return 10
 	case hour >= 7 && hour < 12:
-		return 40
+		return 10
 	case hour >= 12 && hour < 16:
-		return 50
+		return 10
 	case hour >= 16 && hour < 22:
-		return 60
+		return 10
 	default:
-		return 50
+		return 10
 	}
 }
 
@@ -1118,4 +1122,177 @@ func EncryptJSONPayload(plaintext []byte, publicKey *rsa.PublicKey) (string, str
 	ciphertextStr := base64.StdEncoding.EncodeToString(ciphertext)
 
 	return headerValue, ciphertextStr, nil
+}
+
+func MoMoCheckStatus(trxId string) (string, error) {
+	if IsTestMode {
+		return "TEST_SMS_ID", nil
+	}
+	trxId = viper.GetString("MOMO_TRX_PREFIX") + trxId
+	//send http json request
+	request, err := http.NewRequest("GET", fmt.Sprintf("%sapi/v1/momo/transactionstatus/%s", viper.GetString("MOMO_URL"), trxId), nil)
+	if err != nil {
+		return "", err
+	}
+	request.Header.Set("Authorization", viper.GetString("MOMO_KEY"))
+	request.Header.Set("Content-Type", "application/json")
+	client := &http.Client{}
+	resp, err := client.Do(request)
+	if err != nil {
+		return "", err
+	}
+	// Read the response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	fmt.Println(string(body))
+	var result map[string]interface{}
+	err = json.Unmarshal(body, &result)
+	if err != nil {
+		return "", err
+	}
+	if res, ok := result["status"].(float64); ok {
+		if res != 200 {
+			error_message, ok := result["message"].(string)
+			if !ok {
+				return "", errors.New("failed to check momo status, err: " + error_message + ", trxId: " + trxId)
+			}
+			return "", errors.New("failed to check momo status, err: " + error_message + ", trxId: " + trxId)
+		}
+	} else {
+		LogMessage("critical", "MoMoCheckStatus: failed to check mtn status, system error, trxId: "+trxId+". response body: "+string(body), "web-service")
+		return "", errors.New("failed to check status, system error")
+	}
+	return result["momoRef"].(string), nil
+}
+
+func AirtelCheckStatus(trxId string, redis redis.Client) (string, error) {
+	if IsTestMode {
+		return "TEST_SMS_ID", nil
+	}
+	token := redis.Get(ctx, "airtel_token").Val()
+	var err error
+	if token == "" {
+		token, err = AirtelGetToken(redis)
+		fmt.Println("After fetching token: ", token, err)
+		if err != nil {
+			return "", err
+		}
+	}
+	trxId = viper.GetString("MOMO_TRX_PREFIX") + trxId
+	//send http json request
+	request, err := http.NewRequest("GET", fmt.Sprintf("%s/standard/v1/disbursements/%s", viper.GetString("AIRTEL_URL"), trxId), nil)
+	if err != nil {
+		return "", err
+	}
+	request.Header.Set("Authorization", "Bearer "+token)
+	request.Header.Set("X-Country", "RW")
+	request.Header.Set("X-Currency", "RWF")
+	request.Header.Set("Content-Type", "application/json")
+	client := &http.Client{}
+	resp, err := client.Do(request)
+	if err != nil {
+		return "", err
+	}
+	// Read the response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	fmt.Println(string(body))
+	var result map[string]interface{}
+	err = json.Unmarshal(body, &result)
+	if err != nil {
+		return "", err
+	}
+	if res, ok := result["status"].(map[string]any); ok {
+		if res["code"].(string) != "200" {
+			error_message, ok := res["message"].(string)
+			if !ok {
+				return "", errors.New("failed to check airtel status,, err: " + error_message)
+			}
+			return "", errors.New("failed to check airtel status, err: " + error_message)
+		}
+	} else {
+		LogMessage("critical", "MoMoCheckStatus: failed to check airtel status, system error, trxId: "+trxId+". response body: "+string(body), "web-service")
+		return "", errors.New("failed to check status, system error")
+	}
+	if data, ok := result["data"].(map[string]any); ok {
+		if transaction, ok := data["transaction"].(map[string]any); ok {
+			if transaction["status"].(string) == "TS/200" {
+				return transaction["id"].(string), nil
+			} else if transaction["status"].(string) == "TF" {
+				return "", errors.New("fail: " + transaction["message"].(string))
+			} else {
+				return "", errors.New("airtel: failed to check airtel status, transaction status: " + transaction["status"].(string))
+			}
+		}
+	}
+	return "", errors.New("airtel: failed to check airtel status, undefined error")
+}
+
+func ExportToExcel(fileName string, sheetName string, data any) ([]byte, error) {
+	// Ensure the input is a slice of structs
+	sliceValue := reflect.ValueOf(data)
+	if sliceValue.Kind() != reflect.Slice {
+		return nil, fmt.Errorf("data must be a slice")
+	}
+
+	// Create a new Excel file
+	f := excelize.NewFile()
+	if sheetName == "" {
+		sheetName = "Sheet1"
+	}
+	index, err := f.NewSheet(sheetName)
+	if err != nil {
+		return nil, err
+	}
+	f.SetActiveSheet(index)
+
+	// Check if the slice has elements
+	if sliceValue.Len() == 0 {
+		return nil, fmt.Errorf("data slice is empty")
+	}
+
+	// Get the struct type from the first element
+	firstElem := sliceValue.Index(0)
+	if firstElem.Kind() != reflect.Struct {
+		return nil, fmt.Errorf("slice must contain structs")
+	}
+	elemType := firstElem.Type()
+
+	// Write headers based on struct field names
+	for i := 0; i < elemType.NumField(); i++ {
+		header := elemType.Field(i).Name
+		colName, _ := excelize.ColumnNumberToName(i + 1)
+		f.SetCellValue(sheetName, colName+"1", header)
+	}
+
+	// Write the data rows
+	for rowIndex := 0; rowIndex < sliceValue.Len(); rowIndex++ {
+		rowValue := sliceValue.Index(rowIndex)
+		for colIndex := 0; colIndex < elemType.NumField(); colIndex++ {
+			cellValue := rowValue.Field(colIndex).Interface()
+			// Check for null (pointer) and empty strings
+			if strPtr, ok := cellValue.(*string); ok {
+				if strPtr == nil || *strPtr == "" {
+					cellValue = "" // Treat as empty string for null or empty string pointer
+				} else {
+					cellValue = *strPtr
+				}
+			}
+			colName, _ := excelize.ColumnNumberToName(colIndex + 1)
+			f.SetCellValue(sheetName, colName+fmt.Sprint(rowIndex+2), cellValue)
+		}
+	}
+	// Save the file
+	// return f.SaveAs(fileName)
+	// Save the file to a buffer
+	buf := new(bytes.Buffer)
+	if err := f.Write(buf); err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
 }

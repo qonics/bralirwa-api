@@ -1591,7 +1591,7 @@ func StartPrizeDraw(c *fiber.Ctx) error {
 	if period == "MONTHLY" {
 		entryFilter = "e.created_at >= now() - interval '1 month'"
 	} else if period == "WEEKLY" {
-		entryFilter = "e.created_at >= now() - interval '1 week'"
+		entryFilter = "e.created_at >= now() - interval '1 week' AND e.created_at < date_trunc('day', now())"
 	} else if period == "DAILY" {
 		entryFilter = "e.created_at >= now() - interval '1 day'"
 	} else if period == "GRAND" {
@@ -2427,27 +2427,92 @@ func DistributeMomoPrize() {
 		err = rows.Scan(&transaction.Id, &transaction.Amount, &transaction.Phone, &transaction.Mno, &transaction.TrxId, &transaction.TransactionType, &transaction.Code)
 		if err != nil {
 			utils.LogMessage(string(utils.CRITICAL), "DistributeMomoPrize: Unable to scan pending momo transactions, error: "+err.Error(), config.ServiceName)
+			continue
+		}
+		//check first if there is no transaction_records with status=SUCCESS
+		var trxRecordId int
+		err = config.DB.QueryRow(ctx, `select id from transaction_records where transaction_id=$1 and status='SUCCESS'`, transaction.Id).Scan(&trxRecordId)
+		if err == nil {
+			//update transaction status to FAILED
+			_, err = config.DB.Exec(ctx, `UPDATE transaction SET status = 'SUCCESS', error_message = 'Duplicate transaction' WHERE id = $1;`, transaction.Id)
+			if err != nil {
+				utils.LogMessage(string(utils.CRITICAL), "DistributeMomoPrize: Unable to update momo transaction status, error: "+err.Error(), config.ServiceName)
+			}
+			continue
 		}
 		refNo := ""
+		//create new transaction_record
+		var trxRecordCount int
+		newTrxid := transaction.TrxId
+		err = config.DB.QueryRow(ctx, `select count(id) from transaction_records where transaction_id=$1`, transaction.Id).Scan(&trxRecordCount)
+		if err != nil {
+			utils.LogMessage(string(utils.CRITICAL), "DistributeMomoPrize: Unable to fetch transaction_records count, error: "+err.Error(), config.ServiceName)
+		}
+		previousTrxId := newTrxid
+		if trxRecordCount == 1 {
+			newTrxid = newTrxid + "R1"
+		} else if trxRecordCount > 1 {
+			// previousTrxId = fmt.Sprintf("%s%d", newTrxid[:len(newTrxid)-1], (trxRecordCount - 1))
+			previousTrxId = fmt.Sprintf("%sR%d", newTrxid, (trxRecordCount - 1))
+			newTrxid = fmt.Sprintf("%sR%d", newTrxid, trxRecordCount)
+		}
+		fmt.Println("New trxId: ", newTrxid)
+		fmt.Println("Previous trxId: ", previousTrxId)
+		//check  status for previous transaction
+		var statusErr error
+		var statusRefNo string
 		if transaction.Mno == "MTN" {
-			refNo, err = utils.MoMoCredit(transaction.Amount, transaction.Phone, transaction.TrxId, transaction.Code)
+			statusRefNo, statusErr = utils.MoMoCheckStatus(previousTrxId)
+
 		} else if transaction.Mno == "AIRTEL" {
-			refNo, err = utils.AirtelCredit(transaction.Amount, transaction.Phone, transaction.TrxId, transaction.Code, *config.Redis)
+			statusRefNo, statusErr = utils.AirtelCheckStatus(previousTrxId, *config.Redis)
+		}
+		if statusErr == nil {
+			//transaction already completed
+			_, err = config.DB.Exec(ctx, `UPDATE transaction SET status = 'SUCCESS', ref_no = $1 WHERE id = $2;`, statusRefNo, transaction.Id)
+			if err != nil {
+				utils.LogMessage(string(utils.CRITICAL), "DistributeMomoPrize: Unable to update momo transaction status, error: "+err.Error(), config.ServiceName)
+			}
+			utils.LogMessage(string(utils.CRITICAL), "DistributeMomoPrize: Unable to check  transaction status already success, newTrxid: "+newTrxid+", previousTrxId:"+previousTrxId, config.ServiceName)
+			continue
+		} else {
+			utils.LogMessage(string(utils.CRITICAL), "DistributeMomoPrize: Unable to check momo transaction status, error: "+statusErr.Error(), config.ServiceName)
+		}
+		var newTrxRecordId int
+		err := config.DB.QueryRow(ctx, `insert into transaction_records (transaction_id, trx_id,amount,phone,transaction_type,mno,status) values ($1, $2, $3, $4, $5, $6, 'PENDING') returning id`,
+			transaction.Id, newTrxid, transaction.Amount, transaction.Phone, "CREDIT", transaction.Mno).Scan(&newTrxRecordId)
+		if err != nil {
+			utils.LogMessage(string(utils.CRITICAL), "DistributeMomoPrize: Unable to create new transaction_record, error: "+err.Error(), config.ServiceName)
+			continue
+		}
+		if transaction.Mno == "MTN" {
+			refNo, err = utils.MoMoCredit(transaction.Amount, transaction.Phone, newTrxid, transaction.Code)
+		} else if transaction.Mno == "AIRTEL" {
+			refNo, err = utils.AirtelCredit(transaction.Amount, transaction.Phone, newTrxid, transaction.Code, *config.Redis)
 		} else {
 			err = errors.New("invalid network operator")
 		}
 		//TODO: add other network operators (Airtel)
 		if err != nil {
 			//update transaction status and error_message
-			_, err = config.DB.Exec(ctx, `UPDATE transaction SET status = 'FAILED', error_message = $1 WHERE id = $2;`, err.Error(), transaction.Id)
+			err1 := err.Error()
+			_, err = config.DB.Exec(ctx, `UPDATE transaction SET status = 'FAILED', error_message = $1 WHERE id = $2;`, err1, transaction.Id)
 			if err != nil {
 				utils.LogMessage(string(utils.CRITICAL), "DistributeMomoPrize: Unable to update momo transaction status, error: "+err.Error(), config.ServiceName)
+			}
+			_, err = config.DB.Exec(ctx, `UPDATE transaction_records SET status = 'FAILED', error_message = $1 WHERE id = $2;`, err1, newTrxRecordId)
+			if err != nil {
+				utils.LogMessage(string(utils.CRITICAL), "DistributeMomoPrize: Unable to update FAILED momo transaction_records status, error: "+err.Error(), config.ServiceName)
 			}
 		} else {
 			//update transaction status and ref_no
 			_, err = config.DB.Exec(ctx, `UPDATE transaction SET status = 'SUCCESS', ref_no = $1 WHERE id = $2;`, refNo, transaction.Id)
 			if err != nil {
 				utils.LogMessage(string(utils.CRITICAL), "DistributeMomoPrize: Unable to update momo transaction status, error: "+err.Error(), config.ServiceName)
+			}
+			_, err = config.DB.Exec(ctx, `UPDATE transaction_records SET status = 'SUCCESS', ref_no = $1 WHERE id = $2;`, refNo, newTrxRecordId)
+			if err != nil {
+				utils.LogMessage(string(utils.CRITICAL), "DistributeMomoPrize: Unable to update SUCCESS momo transaction_records status, error: "+err.Error(), config.ServiceName)
 			}
 		}
 	}
@@ -2475,6 +2540,9 @@ func ChangeUserStatus(c *fiber.Ctx) error {
 	userPayload, err := utils.SecurePath(c, config.Redis)
 	if err != nil {
 		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
+	}
+	if !userPayload.CanAddUser {
+		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, "You don't have permission to update user info")
 	}
 	userId, err := c.ParamsInt("userId")
 	if err != nil {
@@ -2581,6 +2649,8 @@ func GetTransactions(c *fiber.Ctx) error {
 	trxId := c.Query("trx_id")
 	refNo := c.Query("ref_no")
 	status := c.Query("status")
+	//(optional), excel/pdf. if it is set system will not implement pagination
+	export := c.Query("export")
 	//add pagination
 	page := c.QueryInt("page", 1)
 	limit := c.QueryInt("limit", 20)
@@ -2615,10 +2685,12 @@ func GetTransactions(c *fiber.Ctx) error {
 		},
 		&args1,
 	)
-
-	limitStr := fmt.Sprintf(" limit $%d offset $%d", ii, ii+1)
+	limitStr := ""
 	globalArgs := args1
-	args1 = append(args1, limit, offSet)
+	if export == "" {
+		limitStr = fmt.Sprintf(" limit $%d offset $%d", ii, ii+1)
+		args1 = append(args1, limit, offSet)
+	}
 	transactions := []model.Transactions{}
 	rows, err := config.DB.Query(ctx,
 		`select t.id,t.amount,t.phone,t.mno,t.trx_id,t.ref_no,t.transaction_type,t.status,t.error_message,t.created_at,p.entry_id,p.code,t.customer_id,t.initiated_by from transaction t `+
@@ -2658,6 +2730,22 @@ func GetTransactions(c *fiber.Ctx) error {
 				ServiceName: config.ServiceName,
 			})
 		}
+	}
+	//export data to excel
+	if export == "excel" {
+		fileName := fmt.Sprintf("transactions_%s.xlsx", time.Now().Format("2006-01-02_15-04-05"))
+		filePath := fmt.Sprintf("%s/%s", viper.GetString("EXPORT_PATH"), fileName)
+		rawData, err := utils.ExportToExcel(filePath, "Transactions", transactions)
+		if err != nil {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to export transactions to excel", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "GetTransactions: Unable to export transactions to excel, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+		c.Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+		c.Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, fileName))
+		return c.Send(rawData)
 	}
 	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "data": transactions,
 		"pagination": fiber.Map{"page": page, "limit": limit, "total": totalTransaction}})
@@ -2861,4 +2949,309 @@ func TestSMS(c *fiber.Ctx) error {
 		})
 	}
 	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "SMS sent", "message_id": messageId})
+}
+func ResendTransaction(c *fiber.Ctx) error {
+	userPayload, err := utils.SecurePath(c, config.Redis)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
+	}
+	transactionId, err := c.ParamsInt("transaction_id")
+	if err != nil || transactionId < 1 {
+		return utils.JsonErrorResponse(c, fiber.StatusForbidden, "Invalid transaction id provided")
+	}
+	responseStatus := 200
+	type FormData struct {
+		Password string `json:"password" binding:"required" validate:"required"`
+	}
+	formData := new(FormData)
+	if err := c.BodyParser(formData); err != nil {
+		responseStatus = 400
+		c.SendStatus(responseStatus)
+		return c.JSON(fiber.Map{"status": responseStatus, "message": "Please provide all required data", "details": err})
+	}
+	if err := Validate.Struct(formData); err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Provided data are not valid")
+	}
+	//check if password is correct
+	var fname, lname, userStatus string
+	err = config.DB.QueryRow(ctx,
+		`select u.fname,u.lname,u.status from users u  where id = $1 and password = crypt($2, password)`, userPayload.Id, formData.Password).
+		Scan(&fname, &lname, &userStatus)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			utils.LogMessage("critical", fmt.Sprintf("ConfirmTransaction: Unable to get user data for password verify, Email:%s, err:%v", userPayload.Email, err), "web-service")
+		}
+		responseStatus = 401
+		c.SendStatus(responseStatus)
+		return c.JSON(fiber.Map{"status": responseStatus, "message": "Invalid credentials"})
+	} else if userStatus != "OKAY" {
+		responseStatus = 401
+		c.SendStatus(responseStatus)
+		return c.JSON(fiber.Map{"status": responseStatus, "message": "Your account has been deactivated"})
+	}
+	//get existing status
+	var status, phone, trxId, prizeCode string
+	var refNo *string
+	var amount float64
+	err = config.DB.QueryRow(ctx, `select status,phone,trx_id,ref_no,amount,code from transaction t
+	INNER JOIN prize p on p.id = t.prize_id where t.id=$1`, transactionId).Scan(&status, &phone, &trxId, &refNo, &amount, &prizeCode)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Transaction data is invalid")
+		}
+		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to confirm transaction", utils.Logger{
+			LogLevel:    utils.CRITICAL,
+			Message:     "ResendTransaction: Unable to confirm transaction, error: " + err.Error(),
+			ServiceName: config.ServiceName,
+		})
+	}
+	if status != "FAILED" {
+		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Transaction status is already confirmed, refresh your page")
+	}
+	_, err = config.DB.Exec(ctx, `update transaction set status=$1 where id=$2`, "PENDING", transactionId)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to confirm transaction", utils.Logger{
+			LogLevel:    utils.CRITICAL,
+			Message:     "ResendTransaction: Unable to confirm transaction, error: " + err.Error(),
+			ServiceName: config.ServiceName,
+		})
+	}
+	utils.RecordActivityLog(config.DB,
+		utils.ActivityLog{
+			UserID:       userPayload.Id,
+			ActivityType: "ResendTransaction",
+			Description:  "Resend failed transaction of" + phone + ", TrxId: " + trxId + ", Prize: " + prizeCode,
+			Status:       "success",
+			IPAddress:    c.IP(),
+			UserAgent:    c.Get("User-Agent"),
+		},
+		config.ServiceName,
+		&map[string]interface{}{
+			"transaction_id": transactionId,
+			"status":         "PENDING",
+		},
+	)
+	return c.JSON(fiber.Map{"status": responseStatus, "message": fmt.Sprintf("Transaction of %s confirmed successfully", prizeCode)})
+}
+func ResendBulkTransaction(c *fiber.Ctx) error {
+	userPayload, err := utils.SecurePath(c, config.Redis)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
+	}
+	type FormData struct {
+		TransactionIds []int  `json:"transaction_ids" binding:"required" validate:"required"`
+		Password       string `json:"password" binding:"required" validate:"required"`
+	}
+	responseStatus := 200
+	formData := new(FormData)
+	if err := c.BodyParser(formData); err != nil || len(formData.TransactionIds) == 0 {
+		responseStatus = 400
+		c.SendStatus(responseStatus)
+		return c.JSON(fiber.Map{"status": responseStatus, "message": "Please provide all required data", "details": err})
+	}
+	if err := Validate.Struct(formData); err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Provided data are not valid")
+	}
+	//check if password is correct
+	var fname, lname, userStatus string
+	err = config.DB.QueryRow(ctx,
+		`select u.fname,u.lname,u.status from users u  where id = $1 and password = crypt($2, password)`, userPayload.Id, formData.Password).
+		Scan(&fname, &lname, &userStatus)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			utils.LogMessage("critical", fmt.Sprintf("ConfirmBulkTransaction: Unable to get user data for password verify, Email:%s, err:%v", userPayload.Email, err), "web-service")
+		}
+		responseStatus = 401
+		c.SendStatus(responseStatus)
+		return c.JSON(fiber.Map{"status": responseStatus, "message": "Invalid credentials"})
+	} else if userStatus != "OKAY" {
+		responseStatus = 401
+		c.SendStatus(responseStatus)
+		return c.JSON(fiber.Map{"status": responseStatus, "message": "Your account has been deactivated"})
+	}
+	//get existing status
+	prizeCodes := []string{}
+	var status, phone, trxId, prizeCode string
+	var refNo *string
+	var amount float64
+	for _, transactionId := range formData.TransactionIds {
+		err = config.DB.QueryRow(ctx, `select status,phone,trx_id,ref_no,amount,code from transaction t
+		INNER JOIN prize p on p.id = t.prize_id where t.id=$1`, transactionId).Scan(&status, &phone, &trxId, &refNo, &amount, &prizeCode)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Transaction data is invalid")
+			}
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to confirm transaction", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "ResendBulkTransaction: Unable to confirm transaction, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+		prizeCodes = append(prizeCodes, prizeCode)
+		if status != "FAILED" {
+			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "One of the transaction status is already confirmed, refresh your page #"+prizeCode)
+		}
+	}
+	tx, err := config.DB.Begin(ctx)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to start transactions confirmation", utils.Logger{
+			LogLevel:    utils.CRITICAL,
+			Message:     "ResendBulkTransaction: Unable to start transaction confirmation, error: " + err.Error(),
+			ServiceName: config.ServiceName,
+		})
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback(ctx)
+		} else {
+			tx.Commit(ctx)
+		}
+	}()
+	for _, transaction := range formData.TransactionIds {
+		_, err = tx.Exec(ctx, `update transaction set status=$1 where id=$2`, "PENDING", transaction)
+		if err != nil {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to confirm transaction", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "ResendBulkTransaction: Unable to confirm transaction, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+	}
+	utils.RecordActivityLog(config.DB,
+		utils.ActivityLog{
+			UserID:       userPayload.Id,
+			ActivityType: "ResendBulkTransaction",
+			Description:  fmt.Sprintf("Resend failed bulk transaction, Count:%d, Codes: %s", len(prizeCodes), strings.Join(prizeCodes, ",")),
+			Status:       "success",
+			IPAddress:    c.IP(),
+			UserAgent:    c.Get("User-Agent"),
+		},
+		config.ServiceName,
+		&map[string]interface{}{
+			"transaction_ids": formData.TransactionIds,
+			"status":          "PENDING",
+		},
+	)
+	return c.JSON(fiber.Map{"status": responseStatus, "message": fmt.Sprintf("Transaction of %s confirmed successfully", prizeCode)})
+}
+func EditUser(c *fiber.Ctx) error {
+	userPayload, err := utils.SecurePath(c, config.Redis)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
+	}
+	if !userPayload.CanAddUser {
+		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, "You don't have permission to update a user")
+	}
+	userId, err := c.ParamsInt("userId")
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Invalid user id provided")
+	}
+	type FormData struct {
+		Fname          string `json:"fname" binding:"required" validate:"required,regex=^[a-zA-Z0-9 ]*$"`
+		Lname          string `json:"lname" binding:"required" validate:"required,regex=^[a-zA-Z0-9 ]*$"`
+		Phone          string `json:"phone" binding:"required" validate:"required,regex=^2507[2389]\\d{7}$"`
+		Email          string `json:"email" binding:"required" validate:"required,email"`
+		Department     int    `json:"department" binding:"required" validate:"required,number"`
+		CanAddCode     bool   `json:"can_add_codes" binding:"required" validate:"boolean"`
+		CanTriggerDraw bool   `json:"can_trigger_draw" binding:"required" validate:"boolean"`
+		CanViewLogs    bool   `json:"can_view_logs" binding:"required" validate:"boolean"`
+		CanAddUser     bool   `json:"can_add_user" binding:"required" validate:"boolean"`
+	}
+	responseStatus := 200
+	formData := new(FormData)
+	if err := c.BodyParser(formData); err != nil || formData.Fname == "" {
+		responseStatus = 400
+		c.SendStatus(responseStatus)
+		return c.JSON(fiber.Map{"status": responseStatus, "message": "Please provide all required data - " + formData.Fname, "details": err})
+	}
+	if err := Validate.Struct(formData); err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Provide data are not valid")
+	}
+	invalidKeys := utils.ValidateStruct(formData, []string{"#", "@"}, []string{})
+	errorMessage := utils.ValidateStructText(invalidKeys)
+	if errorMessage != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, *errorMessage)
+	}
+	//fetch existing user data
+	userData := model.UserProfile{}
+	//fetch users
+	err = config.DB.QueryRow(ctx,
+		`select u.id,u.fname,u.lname,u.email,u.phone,u.department_id,d.title as department_title, u.email_verified,u.phone_verified,u.avatar_url,u.status,
+			u.can_add_codes,u.can_trigger_draw,u.can_view_logs,u.can_add_user,force_change_password from users u inner join departments d on u.department_id = d.id where u.id=$1`, userId).
+		Scan(&userData.Id, &userData.Fname, &userData.Lname, &userData.Email, &userData.Phone, &userData.Department.Id, &userData.Department.Title,
+			&userData.EmailVerified, &userData.PhoneVerified, &userData.AvatarUrl, &userData.Status, &userData.CanAddCodes, &userData.CanTriggerDraw, &userData.CanViewLogs,
+			&userData.CanAddUser, &userData.ForceChangePassword)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get users data failed", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "GetUsers: Unable to get users data, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+		return utils.JsonErrorResponse(c, fiber.StatusForbidden, "users data is not valid")
+	}
+	logsChange := ""
+	if userData.Fname != formData.Fname {
+		logsChange += fmt.Sprintf("fname: %s -> %s, ", userData.Fname, formData.Fname)
+	}
+	if userData.Lname != formData.Lname {
+		logsChange += fmt.Sprintf("lname: %s -> %s, ", userData.Lname, formData.Lname)
+	}
+	if userData.Phone != formData.Phone {
+		logsChange += fmt.Sprintf("phone: %s -> %s, ", userData.Phone, formData.Phone)
+	}
+	if userData.Email != formData.Email {
+		logsChange += fmt.Sprintf("email: %s -> %s, ", userData.Email, formData.Email)
+	}
+	if userData.Department.Id != formData.Department {
+		logsChange += fmt.Sprintf("department: %d -> %d, ", userData.Department.Id, formData.Department)
+	}
+	if userData.CanAddCodes != formData.CanAddCode {
+		logsChange += fmt.Sprintf("can_add_codes: %t -> %t, ", userData.CanAddCodes, formData.CanAddCode)
+	}
+	if userData.CanTriggerDraw != formData.CanTriggerDraw {
+		logsChange += fmt.Sprintf("can_trigger_draw: %t -> %t, ", userData.CanTriggerDraw, formData.CanTriggerDraw)
+	}
+	if userData.CanViewLogs != formData.CanViewLogs {
+		logsChange += fmt.Sprintf("can_view_logs: %t -> %t, ", userData.CanViewLogs, formData.CanViewLogs)
+	}
+	if userData.CanAddUser != formData.CanAddUser {
+		logsChange += fmt.Sprintf("can_add_user: %t -> %t, ", userData.CanAddUser, formData.CanAddUser)
+	}
+	if logsChange == "" {
+		return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "No changes made")
+	}
+	_, err = config.DB.Exec(ctx,
+		`update users set fname=$1,lname=$2,email=$3,phone=$4,department_id=$5,can_add_codes=$6,can_trigger_draw=$7,can_view_logs=$8,can_add_user=$9 where id=$10`,
+		formData.Fname, formData.Lname, formData.Email, formData.Phone, formData.Department, formData.CanAddCode, formData.CanTriggerDraw, formData.CanViewLogs, formData.CanAddUser, userId)
+
+	if err != nil {
+		if ok, key := utils.IsErrDuplicate(err); ok {
+			return utils.JsonErrorResponse(c, fiber.StatusConflict, fmt.Sprintf("Unable to update user data, %s already exists", key))
+		} else if ok, key := utils.IsForeignKeyErr(err); ok {
+			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, fmt.Sprintf("Unable to update user data, %s is invalid", key))
+		}
+		responseStatus = fiber.StatusConflict
+		c.SendStatus(responseStatus)
+		return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to update data, system error. please try again later", utils.Logger{
+			LogLevel:    utils.CRITICAL,
+			Message:     fmt.Sprintf("CreatePrizeType: Unable to update data, Name:%s, err:%v", formData.Fname, err),
+			ServiceName: config.ServiceName,
+		})
+	}
+
+	utils.RecordActivityLog(config.DB,
+		utils.ActivityLog{
+			UserID:       userPayload.Id,
+			ActivityType: "updateUser",
+			Description:  "update user data, " + logsChange,
+			Status:       "success",
+			IPAddress:    c.IP(),
+			UserAgent:    c.Get("User-Agent"),
+		},
+		config.ServiceName,
+		nil,
+	)
+	return c.JSON(fiber.Map{"status": responseStatus, "message": formData.Fname + " updated successfully"})
 }

@@ -666,6 +666,7 @@ func completeRegistration(args ...interface{}) string {
 	go func() {
 		config.DB.Exec(ctx, "REFRESH MATERIALIZED VIEW codes_count")
 	}()
+	fmt.Println("completeRegistration: ", args[3].(string), sms_message, message_type, customerId)
 	go utils.SendSMS(config.DB, args[3].(string), sms_message, viper.GetString("SENDER_ID"), config.ServiceName, message_type, &customerId, config.Redis)
 	return "success_entry"
 }
@@ -713,6 +714,7 @@ func entrySaveCode(args ...interface{}) string {
 	go func() {
 		config.DB.Exec(ctx, "REFRESH MATERIALIZED VIEW codes_count")
 	}()
+	fmt.Println("entrySaveCode: ", args[3].(string), sms_message, message_type, USSDdata.CustomerId)
 	go utils.SendSMS(config.DB, args[3].(string), sms_message, viper.GetString("SENDER_ID"), config.ServiceName, message_type, USSDdata.CustomerId, config.Redis)
 	return ""
 }

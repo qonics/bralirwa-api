@@ -947,6 +947,7 @@
     {
       "endpoint": "/api/v1/transactions",
       "method": "GET",
+      "timeout": "60s",
       "output_encoding": "no-op",
       "backend": [
         {
@@ -969,6 +970,7 @@
         "status",
         "transaction_type",
         "page",
+        "export",
         "limit"
       ],
       "input_headers": [
@@ -1031,6 +1033,75 @@
       "backend": [
         {
           "url_pattern": "/api/v1/confirm-bulk-trx",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "POST",
+          "host": [
+            "http://web-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ],
+      "input_headers": [
+        "Authorization",
+        "Content-Type",
+        "User-Agent",
+        "Host"
+      ]
+    },
+    {
+      "endpoint": "/api/v1/resend-bulk-trx",
+      "method": "POST",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/api/v1/resend-bulk-trx",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "POST",
+          "host": [
+            "http://web-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ],
+      "input_headers": [
+        "Authorization",
+        "Content-Type",
+        "User-Agent",
+        "Host"
+      ]
+    },
+    {
+      "endpoint": "/api/v1/resend-trx/{transaction_id}",
+      "method": "POST",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/api/v1/resend-trx/{transaction_id}",
+          "encoding": "no-op",
+          "sd": "static",
+          "method": "POST",
+          "host": [
+            "http://web-service:9000"
+          ],
+          "disable_host_sanitize": false
+        }
+      ],
+      "input_headers": [
+        "Authorization",
+        "Content-Type",
+        "User-Agent",
+        "Host"
+      ]
+    },
+    {
+      "endpoint": "/api/v1/user/{user_id}",
+      "method": "POST",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/api/v1/user/{user_id}",
           "encoding": "no-op",
           "sd": "static",
           "method": "POST",
