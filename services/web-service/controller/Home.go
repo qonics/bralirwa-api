@@ -2693,8 +2693,9 @@ func GetTransactions(c *fiber.Ctx) error {
 	}
 	transactions := []model.Transactions{}
 	rows, err := config.DB.Query(ctx,
-		`select t.id,t.amount,t.phone,t.mno,t.trx_id,t.ref_no,t.transaction_type,t.status,t.error_message,t.created_at,p.entry_id,p.code,t.customer_id,t.initiated_by from transaction t `+
-			` inner join prize p on p.id = t.prize_id `+logsFilter+` order by t.created_at desc`+limitStr, args1...)
+		`select t.id,t.amount,t.phone,t.mno,coalesce(tr.trx_id,t.trx_id) as trx_id,t.ref_no,t.transaction_type,t.status,CASE WHEN t.status='SUCCESS' THEN '' ELSE t.error_message END as error_message,
+		t.created_at,p.entry_id,p.code,t.customer_id,t.initiated_by,t.updated_at,p.id as prize_id from transaction t
+		inner join prize p on p.id = t.prize_id LEFT JOIN (select max(id) as id,max(trx_id) as trx_id,transaction_id from transaction_records group by transaction_id) tr ON tr.transaction_id = t.id `+logsFilter+` order by t.created_at desc`+limitStr, args1...)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get transaction data failed", utils.Logger{
@@ -2708,7 +2709,8 @@ func GetTransactions(c *fiber.Ctx) error {
 	for rows.Next() {
 		transaction := model.Transactions{}
 		err = rows.Scan(&transaction.Id, &transaction.Amount, &transaction.Phone, &transaction.Mno, &transaction.TrxId, &transaction.RefNo, &transaction.TransactionType,
-			&transaction.Status, &transaction.ErrorMessage, &transaction.CreatedAt, &transaction.EntryId, &transaction.Code, &transaction.CustomerId, &transaction.InitiatedBy)
+			&transaction.Status, &transaction.ErrorMessage, &transaction.CreatedAt, &transaction.EntryId, &transaction.Code, &transaction.CustomerId,
+			&transaction.InitiatedBy, &transaction.UpdatedAt, &transaction.PrizeId)
 		if err != nil {
 			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get transaction data failed", utils.Logger{
 				LogLevel:    utils.CRITICAL,
@@ -2716,6 +2718,7 @@ func GetTransactions(c *fiber.Ctx) error {
 				ServiceName: config.ServiceName,
 			})
 		}
+		transaction.Charges = 120
 		transactions = append(transactions, transaction)
 	}
 	//get total logs for pagination
@@ -3254,4 +3257,375 @@ func EditUser(c *fiber.Ctx) error {
 		nil,
 	)
 	return c.JSON(fiber.Map{"status": responseStatus, "message": formData.Fname + " updated successfully"})
+}
+func PlayerMetrics(c *fiber.Ctx) error {
+	_, err := utils.SecurePath(c, config.Redis)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
+	}
+	type PrizeOverview struct {
+		Province string `json:"province"`
+		Mno      string `json:"mno"`
+		Count    int    `json:"count"`
+	}
+	startDateStr := c.Query("start_date")
+	endDateStr := c.Query("end_date")
+	if startDateStr == "" {
+		//set default to today
+		startDateStr = time.Now().Format("2006-01-02")
+	}
+	if endDateStr == "" {
+		//set default to today
+		startDateStr = time.Now().Format("2006-01-02")
+	}
+	dateFilter := ""
+	args := []interface{}{}
+	var startDate time.Time
+	if len(startDateStr) != 0 {
+		startDate, err = time.Parse("2006-01-02", startDateStr)
+		if err != nil {
+			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Invalid start date provided")
+		}
+		dateFilter += "e.created_at >= $1"
+		args = append(args, startDateStr)
+	}
+	if len(endDateStr) != 0 {
+		endDate, err := time.Parse("2006-01-02", endDateStr)
+		//check if end date is after start date
+		if len(startDateStr) != 0 {
+			if endDate.Before(startDate) {
+				return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "End date should be after start date")
+			}
+		}
+		//add one day to include the end date
+		endDate = endDate.AddDate(0, 0, 1)
+		if err != nil {
+			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Invalid end date provided")
+		}
+		argName := "$1"
+		if len(dateFilter) != 0 {
+			dateFilter += " and "
+			argName = "$2"
+		}
+		args = append(args, endDate)
+		dateFilter += "e.created_at <= " + argName
+	}
+	if len(dateFilter) != 0 {
+		dateFilter = " where " + dateFilter
+	}
+	query := fmt.Sprintf(`select count(e.id) as count,p.name as province,c.network_operator from entries e
+	INNER JOIN customer c ON c.id=e.customer_id INNER JOIN province p ON p.id=c.province %s group by c.network_operator,p.id`, dateFilter)
+	fmt.Println(query)
+	rows, err := config.DB.Query(ctx, query, args...)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get player metrics data failed", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "PlayerMetrics: Unable to get player metrics data, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+		return utils.JsonErrorResponse(c, fiber.StatusForbidden, "player metrics data is not valid")
+	}
+	metrics := map[string]any{
+		"east": map[string]any{
+			"mtn":    0,
+			"airtel": 0,
+		},
+		"north": map[string]any{
+			"mtn":    0,
+			"airtel": 0,
+		},
+		"south": map[string]any{
+			"mtn":    0,
+			"airtel": 0,
+		},
+		"west": map[string]any{
+			"mtn":    0,
+			"airtel": 0,
+		},
+		"kigali": map[string]any{
+			"mtn":    0,
+			"airtel": 0,
+		},
+	}
+	for rows.Next() {
+		prizeOverview := PrizeOverview{}
+		err = rows.Scan(&prizeOverview.Count, &prizeOverview.Province, &prizeOverview.Mno)
+		if err != nil {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get player metrics data failed", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "PlayerMetrics: Unable to get player metrics data, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+		if prizeOverview.Province == "Eastern Province" {
+			prizeOverview.Province = "east"
+		} else if prizeOverview.Province == "Northern Province" {
+			prizeOverview.Province = "north"
+		} else if prizeOverview.Province == "Southern Province" {
+			prizeOverview.Province = "south"
+		} else if prizeOverview.Province == "Western Province" {
+			prizeOverview.Province = "west"
+		} else if prizeOverview.Province == "City of Kigali" {
+			prizeOverview.Province = "kigali"
+		}
+		if metrics[prizeOverview.Province] == nil {
+			metrics[prizeOverview.Province] = map[string]any{
+				"mtn":    0,
+				"airtel": 0,
+			}
+		}
+		metrics[prizeOverview.Province].(map[string]any)[strings.ToLower(prizeOverview.Mno)] = prizeOverview.Count
+	}
+	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "data": metrics})
+}
+func WinnerMetrics(c *fiber.Ctx) error {
+	_, err := utils.SecurePath(c, config.Redis)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
+	}
+	type PrizeOverview struct {
+		Province string `json:"province"`
+		Mno      string `json:"mno"`
+		Count    int    `json:"count"`
+	}
+	startDateStr := c.Query("start_date")
+	endDateStr := c.Query("end_date")
+	if startDateStr == "" {
+		//set default to today
+		startDateStr = time.Now().Format("2006-01-02")
+	}
+	if endDateStr == "" {
+		//set default to today
+		startDateStr = time.Now().Format("2006-01-02")
+	}
+	dateFilter := ""
+	args := []interface{}{}
+	var startDate time.Time
+	if len(startDateStr) != 0 {
+		startDate, err = time.Parse("2006-01-02", startDateStr)
+		if err != nil {
+			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Invalid start date provided")
+		}
+		dateFilter += "pr.created_at >= $1"
+		args = append(args, startDateStr)
+	}
+	if len(endDateStr) != 0 {
+		endDate, err := time.Parse("2006-01-02", endDateStr)
+		//check if end date is after start date
+		if len(startDateStr) != 0 {
+			if endDate.Before(startDate) {
+				return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "End date should be after start date")
+			}
+		}
+		//add one day to include the end date
+		endDate = endDate.AddDate(0, 0, 1)
+		if err != nil {
+			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Invalid end date provided")
+		}
+		argName := "$1"
+		if len(dateFilter) != 0 {
+			dateFilter += " and "
+			argName = "$2"
+		}
+		args = append(args, endDate)
+		dateFilter += "pr.created_at <= " + argName
+	}
+	if len(dateFilter) != 0 {
+		dateFilter = " where " + dateFilter
+	}
+	query := fmt.Sprintf(`select count(pr.id) as count,p.name as province,c.network_operator from prize pr
+	INNER JOIN entries e ON pr.entry_id=e.id
+	INNER JOIN customer c ON c.id=e.customer_id INNER JOIN province p ON p.id=c.province %s group by c.network_operator,p.id`, dateFilter)
+	fmt.Println(query)
+	rows, err := config.DB.Query(ctx, query, args...)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get winner metrics data failed", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "WinnerMetrics: Unable to get winner metrics data, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+		return utils.JsonErrorResponse(c, fiber.StatusForbidden, "winner metrics data is not valid")
+	}
+	metrics := map[string]any{
+		"east": map[string]any{
+			"mtn":    0,
+			"airtel": 0,
+		},
+		"north": map[string]any{
+			"mtn":    0,
+			"airtel": 0,
+		},
+		"south": map[string]any{
+			"mtn":    0,
+			"airtel": 0,
+		},
+		"west": map[string]any{
+			"mtn":    0,
+			"airtel": 0,
+		},
+		"kigali": map[string]any{
+			"mtn":    0,
+			"airtel": 0,
+		},
+	}
+	for rows.Next() {
+		prizeOverview := PrizeOverview{}
+		err = rows.Scan(&prizeOverview.Count, &prizeOverview.Province, &prizeOverview.Mno)
+		if err != nil {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get player metrics data failed", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "WinnerMetrics: Unable to get player metrics data, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+		if prizeOverview.Province == "Eastern Province" {
+			prizeOverview.Province = "east"
+		} else if prizeOverview.Province == "Northern Province" {
+			prizeOverview.Province = "north"
+		} else if prizeOverview.Province == "Southern Province" {
+			prizeOverview.Province = "south"
+		} else if prizeOverview.Province == "Western Province" {
+			prizeOverview.Province = "west"
+		} else if prizeOverview.Province == "City of Kigali" {
+			prizeOverview.Province = "kigali"
+		}
+		if metrics[prizeOverview.Province] == nil {
+			metrics[prizeOverview.Province] = map[string]any{
+				"mtn":    0,
+				"airtel": 0,
+			}
+		}
+		metrics[prizeOverview.Province].(map[string]any)[strings.ToLower(prizeOverview.Mno)] = prizeOverview.Count
+	}
+	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "data": metrics})
+}
+
+func GetPrizeOverviewV2(c *fiber.Ctx) error {
+	_, err := utils.SecurePath(c, config.Redis)
+	if err != nil {
+		return utils.JsonErrorResponse(c, fiber.StatusUnauthorized, err.Error())
+	}
+	type PrizeOverview struct {
+		TotalPrize      float64 `json:"total_prize"`
+		PrizeCount      int     `json:"prize_count"`
+		TotalEligibilty float64 `json:"total_elligibility"`
+		PrizeType       string  `json:"prize_type"`
+		Status          string  `json:"status"`
+	}
+	startDateStr := c.Query("start_date")
+	endDateStr := c.Query("end_date")
+	if startDateStr == "" {
+		//set default to today
+		startDateStr = time.Now().Format("2006-01-02")
+	}
+	if endDateStr == "" {
+		//set default to today
+		startDateStr = time.Now().Format("2006-01-02")
+	}
+	dateFilter := ""
+	args := []interface{}{}
+	var startDate time.Time
+	if len(startDateStr) != 0 {
+		startDate, err = time.Parse("2006-01-02", startDateStr)
+		if err != nil {
+			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Invalid start date provided")
+		}
+		dateFilter += "p.created_at >= $1"
+		args = append(args, startDateStr)
+	}
+	if len(endDateStr) != 0 {
+		endDate, err := time.Parse("2006-01-02", endDateStr)
+		//check if end date is after start date
+		if len(startDateStr) != 0 {
+			if endDate.Before(startDate) {
+				return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "End date should be after start date")
+			}
+		}
+		//add one day to include the end date
+		endDate = endDate.AddDate(0, 0, 1)
+		if err != nil {
+			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Invalid end date provided")
+		}
+		argName := "$1"
+		if len(dateFilter) != 0 {
+			dateFilter += " and "
+			argName = "$2"
+		}
+		args = append(args, endDate)
+		dateFilter += "p.created_at <= " + argName
+	}
+	if len(dateFilter) != 0 {
+		dateFilter = " where " + dateFilter
+	}
+	prizeOverviews := []PrizeOverview{}
+	query := fmt.Sprintf(`select sum(p.prize_value),count(p.id),pt.elligibility,t.status,pt.name from prize p
+	INNER JOIN prize_type pt ON pt.id=p.prize_type_id INNER JOIN transaction t ON p.id=t.prize_id %s group by pt.id,t.status`, dateFilter)
+	rows, err := config.DB.Query(ctx, query, args...)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get prizeOverview data failed", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "GetPrizeOverviewV2: Unable to get prizeOverview data, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+		return utils.JsonErrorResponse(c, fiber.StatusForbidden, "prizeOverview data is not valid")
+	}
+	for rows.Next() {
+		prizeOverview := PrizeOverview{}
+		err = rows.Scan(&prizeOverview.TotalPrize, &prizeOverview.PrizeCount, &prizeOverview.TotalEligibilty, &prizeOverview.Status, &prizeOverview.PrizeType)
+		if err != nil {
+			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get prizeOverview data failed", utils.Logger{
+				LogLevel:    utils.CRITICAL,
+				Message:     "GetPrizeOverviewV2: Unable to get prizeOverview data, error: " + err.Error(),
+				ServiceName: config.ServiceName,
+			})
+		}
+		if prizeOverview.Status != "SUCCESS" {
+			prizeOverview.Status = "PENDING"
+		}
+		prizeOverviews = append(prizeOverviews, prizeOverview)
+	}
+	data := map[string]any{
+		"payouts": map[string]any{
+			"expected": 0,
+			"actual":   0,
+		},
+		"winners": map[string]any{
+			"paid":    0,
+			"pending": 0,
+		},
+		"rewards": map[string]any{
+			"distributed": 0,
+			"total":       0,
+		},
+	}
+	loadedType := make(map[string]bool)
+	var expected, distributed, total float64
+	for _, prizeOverview := range prizeOverviews {
+		expected += prizeOverview.TotalPrize
+		if ok, _ := loadedType[prizeOverview.PrizeType]; !ok {
+			loadedType[prizeOverview.PrizeType] = true
+			total += prizeOverview.TotalEligibilty
+		}
+		distributed += float64(prizeOverview.PrizeCount)
+		if prizeOverview.Status == "SUCCESS" {
+			data["payouts"].(map[string]any)["actual"] = data["payouts"].(map[string]any)["actual"].(int) + int(prizeOverview.TotalPrize)
+			data["winners"].(map[string]any)["paid"] = data["winners"].(map[string]any)["paid"].(int) + prizeOverview.PrizeCount
+		} else {
+			data["winners"].(map[string]any)["pending"] = data["winners"].(map[string]any)["pending"].(int) + prizeOverview.PrizeCount
+		}
+		if prizeOverview.PrizeType == "REWARD" {
+			data["rewards"].(map[string]any)["distributed"] = data["rewards"].(map[string]any)["distributed"].(int) + prizeOverview.PrizeCount
+			data["rewards"].(map[string]any)["total"] = data["rewards"].(map[string]any)["total"].(int) + int(prizeOverview.TotalEligibilty)
+		}
+	}
+	data["payouts"].(map[string]any)["expected"] = expected
+	data["rewards"].(map[string]any)["distributed"] = distributed
+	data["rewards"].(map[string]any)["total"] = total
+	return c.JSON(fiber.Map{"status": fiber.StatusOK, "message": "success", "prize_overview": data})
 }
