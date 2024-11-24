@@ -83,5 +83,10 @@ func InitRoutes() *fiber.App {
 	v1.Post("/resend-bulk-trx", controller.ResendBulkTransaction)
 	v1.Post("/resend-trx/:transaction_id", controller.ResendTransaction)
 	v1.Get("/test-sms/:mno/:phone", controller.TestSMS)
+	v1.Get("/player-metrics", controller.PlayerMetrics)
+	v1.Get("/winner-metrics", controller.WinnerMetrics)
+
+	v2 := app.Group("/api/v2/")
+	v2.Get("/prize_overview", controller.GetPrizeOverviewV2)
 	return app
 }

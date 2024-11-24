@@ -824,15 +824,15 @@ func RecordActivityLog(db *pgxpool.Pool, log ActivityLog, serviceName string, ex
 func getOdds(hour int) int {
 	switch {
 	case hour >= 0 && hour < 7:
-		return 10
+		return 5
 	case hour >= 7 && hour < 12:
-		return 10
+		return 5
 	case hour >= 12 && hour < 16:
-		return 10
+		return 5
 	case hour >= 16 && hour < 22:
-		return 10
+		return 5
 	default:
-		return 10
+		return 5
 	}
 }
 

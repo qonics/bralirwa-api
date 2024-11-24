@@ -16,6 +16,7 @@ type Transactions struct {
 	Code            string    `json:"code"`
 	ErrorMessage    *string   `json:"error_message"`
 	EntryId         int       `json:"entry_id"`
+	Charges         int       `json:"charges"`
 	Status          string    `json:"status"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
