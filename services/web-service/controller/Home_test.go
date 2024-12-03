@@ -1373,7 +1373,7 @@ func TestStartPrizeDraw(t *testing.T) {
 		{
 			description: "invalid prize type",
 			payload: map[string]any{
-				"prize_type": 1001,
+				"prize_type": 100001,
 			},
 			expectedCode: fiber.StatusForbidden,
 		},
