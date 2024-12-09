@@ -663,9 +663,9 @@ func completeRegistration(args ...interface{}) string {
 	if err != nil {
 		return err.Error()
 	}
-	go func() {
-		config.DB.Exec(ctx, "REFRESH MATERIALIZED VIEW codes_count")
-	}()
+	// go func() {
+	// 	config.DB.Exec(ctx, "REFRESH MATERIALIZED VIEW codes_count")
+	// }()
 	fmt.Println("completeRegistration: ", args[3].(string), sms_message, message_type, customerId)
 	go utils.SendSMS(config.DB, args[3].(string), sms_message, viper.GetString("SENDER_ID"), config.ServiceName, message_type, &customerId, config.Redis)
 	return "success_entry"
@@ -692,6 +692,11 @@ func entrySaveCode(args ...interface{}) string {
 		return "fail:inactive_code"
 	}
 	var entryId int
+	//check if codeId is a valid int
+	if _, err := strconv.Atoi(fmt.Sprintf("%v", codeId)); err != nil {
+		utils.LogMessage("error", "entrySaveCode: invalid codeId: err:"+err.Error(), "ussd-service")
+		return "err:system_error"
+	}
 	//create entry record
 	err = config.DB.QueryRow(ctx, `insert into entries (customer_id,code_id) values ($1,$2) returning id`, USSDdata.CustomerId, codeId).Scan(&entryId)
 	if err != nil {
@@ -711,9 +716,9 @@ func entrySaveCode(args ...interface{}) string {
 	if err != nil {
 		return err.Error()
 	}
-	go func() {
-		config.DB.Exec(ctx, "REFRESH MATERIALIZED VIEW codes_count")
-	}()
+	// go func() {
+	// 	config.DB.Exec(ctx, "REFRESH MATERIALIZED VIEW codes_count")
+	// }()
 	fmt.Println("entrySaveCode: ", args[3].(string), sms_message, message_type, USSDdata.CustomerId)
 	go utils.SendSMS(config.DB, args[3].(string), sms_message, viper.GetString("SENDER_ID"), config.ServiceName, message_type, USSDdata.CustomerId, config.Redis)
 	return ""
@@ -741,7 +746,7 @@ func dailyPrizeWinning(entryId int, code string, lang string) (string, string, b
 		//try to get daily prize and check if there is a remaining room (based on elligibility and distributed prizes)
 		//get daily prize typey
 		err := config.DB.QueryRow(ctx, `select pt.id, pt.name,(pt.elligibility - count(p.id)) as remaining_place,pt.value,pt.status,pt.distribution_type from prize_type pt
-		LEFT JOIN prize p on p.prize_type_id = pt.id and DATE(p.created_at) = CURRENT_DATE where pt.period = 'DAILY' and pt.trigger_by_system = true and pt.status='OKAY' group by pt.id, p.prize_type_id order by random() limit 1`).
+		LEFT JOIN prize p on p.prize_type_id = pt.id and DATE(p. created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali') = CURRENT_DATE where pt.period = 'DAILY' and pt.trigger_by_system = true and pt.status='OKAY' group by pt.id, p.prize_type_id order by random() limit 1`).
 			Scan(&prizeType.Id, &prizeType.Name, &prizeType.RemainingPlace, &prizeType.Value, &prizeType.Status, &prizeType.DistrutionType)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {

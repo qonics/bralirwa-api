@@ -1,7 +1,7 @@
 CREATE TABLE IF NOT EXISTS entries (
     id SERIAL PRIMARY KEY,
-    customer_id INT REFERENCES customer(id),
-    code_id INT REFERENCES codes(id),
+    customer_id INT NOT NULL REFERENCES customer(id),
+    code_id INT NOT NULL UNIQUE REFERENCES codes(id),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT unique_customer_code UNIQUE (customer_id, code_id)
