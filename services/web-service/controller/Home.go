@@ -211,7 +211,7 @@ func GetPrizeCategory(c *fiber.Ctx) error {
 	}
 	categories := []model.PrizeCategory{}
 	rows, err := config.DB.Query(ctx,
-		`select id,name,status,created_at from prize_category`)
+		`select id,name,status,created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali' from prize_category`)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get category data failed", utils.Logger{
@@ -246,11 +246,11 @@ func GetPrizeType(c *fiber.Ctx) error {
 	var rows pgx.Rows
 	if prizeCategory == "" {
 		rows, err = config.DB.Query(ctx,
-			`select p.id,p.name,p.status,p.value,p.elligibility,pc.name as category_name,pc.id as category_id,pc.status as category_status,pc.created_at,p.created_at,
+			`select p.id,p.name,p.status,p.value,p.elligibility,pc.name as category_name,pc.id as category_id,pc.status as category_status,pc.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali',p.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali',
 			p.period,p.distribution_type,p.expiry_date,STRING_AGG(pm.lang, ', ') as langs,STRING_AGG(pm.message, ', ') as messages,trigger_by_system from prize_type p join prize_category pc on p.prize_category_id = pc.id join prize_message pm on pm.prize_type_id=p.id group by p.id,pc.id`)
 	} else {
 		rows, err = config.DB.Query(ctx,
-			`select p.id,p.name,p.status,p.value,p.elligibility,pc.name as category_name,pc.id as category_id,pc.status as category_status,pc.created_at,p.created_at,
+			`select p.id,p.name,p.status,p.value,p.elligibility,pc.name as category_name,pc.id as category_id,pc.status as category_status,pc.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali',p.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali',
 			p.period,p.distribution_type,p.expiry_date,STRING_AGG(pm.lang, ', ') as langs,STRING_AGG(pm.message, ', ') as messages,trigger_by_system from prize_type p join prize_category pc on p.prize_category_id = pc.id join prize_message pm on pm.prize_type_id=p.id where p.prize_category_id=$1 group by p.id,pc.id`, prizeCategory)
 	}
 	if err != nil {
@@ -311,11 +311,11 @@ func GetPrizeTypeSpace(c *fiber.Ctx) error {
 	//get occupied prize space based on prize type period
 	prizeFilter := ""
 	if prizeType.Period == "MONTHLY" {
-		prizeFilter = "created_at >= now() - interval '1 month'"
+		prizeFilter = "created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali' >= now() - interval '1 month'"
 	} else if prizeType.Period == "WEEKLY" {
-		prizeFilter = "created_at >= now() - interval '1 week'"
+		prizeFilter = "created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali' >= now() - interval '6 day'"
 	} else if prizeType.Period == "DAILY" {
-		prizeFilter = "created_at >= now() - interval '1 day'"
+		prizeFilter = "created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali' >= now() - interval '1 day'"
 	}
 	if prizeFilter != "" {
 		prizeFilter = " and " + prizeFilter
@@ -369,8 +369,8 @@ func GetEntries(c *fiber.Ctx) error {
 	// limitStr := fmt.Sprintf(" limit $%d offset $%d", a+1, a+2)
 	logsFilter, ii := utils.BuildQueryFilter(
 		map[string]interface{}{
-			"e.created_at >= ":   startDateStr,
-			"e.created_at <= ":   endDateStr,
+			"e.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali' >= ": startDateStr,
+			"e.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali' <= ": endDateStr,
 			"c.province":         provinceId,
 			"c.network_operator": networkOperator,
 		},
@@ -381,8 +381,8 @@ func GetEntries(c *fiber.Ctx) error {
 	args1 = append(args1, limit, offSet)
 	entries := []model.Entries{}
 	rows, err := config.DB.Query(ctx,
-		`select e.id,e.code_id,e.customer_id,e.created_at,p.id as province_id,p.name as province_name,d.id as district_id,d.name as district_name,
-		c.created_at,pt.name as prize_type_name,pt.id as prize_type_id,pt.value as prize_type_value,cd.created_at,c.network_operator,c.locale from entries e
+		`select e.id,e.code_id,e.customer_id,e.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali',p.id as province_id,p.name as province_name,d.id as district_id,d.name as district_name,
+		c.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali',pt.name as prize_type_name,pt.id as prize_type_id,pt.value as prize_type_value,cd.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali',c.network_operator,c.locale from entries e
 		inner join customer c on e.customer_id = c.id
 		inner join codes cd on e.code_id = cd.id
 		inner join province p on c.province = p.id
@@ -472,10 +472,10 @@ func GetPrizes(c *fiber.Ctx) error {
 	// limitStr := fmt.Sprintf(" limit $%d offset $%d", a+1, a+2)
 	logsFilter, ii := utils.BuildQueryFilter(
 		map[string]interface{}{
-			"p.created_at >= ": startDateStr,
-			"p.created_at <= ": endDateStr,
-			"p.prize_type_id":  typeId,
-			"p.code":           code,
+			"p.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali' >= ": startDateStr,
+			"p.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali' <= ": endDateStr,
+			"p.prize_type_id": typeId,
+			"p.code":          code,
 		},
 		&args1,
 	)
@@ -484,7 +484,7 @@ func GetPrizes(c *fiber.Ctx) error {
 	args1 = append(args1, limit, offSet)
 	prizes := []model.Prize{}
 	rows, err := config.DB.Query(ctx,
-		`select p.id,p.rewarded,p.created_at,p.prize_value,p.prize_type_id,pc.name as category_name,pc.status as category_status,pc.created_at as category_created_at,
+		`select p.id,p.rewarded,p.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali',p.prize_value,p.prize_type_id,pc.name as category_name,pc.status as category_status,pc.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali' as category_created_at,
 		e.customer_id,pt.name,pc.id,p.code from prize p
 		inner join entries e on p.entry_id = e.id
 		inner join prize_type pt on pt.id = p.prize_type_id
@@ -803,9 +803,9 @@ func GetDraws(c *fiber.Ctx) error {
 	// limitStr := fmt.Sprintf(" limit $%d offset $%d", a+1, a+2)
 	logsFilter, ii := utils.BuildQueryFilter(
 		map[string]interface{}{
-			"d.created_at >= ": startDateStr,
-			"d.created_at <= ": endDateStr,
-			"d.code":           code,
+			"d.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali' >= ": startDateStr,
+			"d.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali' <= ": endDateStr,
+			"d.code": code,
 		},
 		&args1,
 	)
@@ -814,8 +814,8 @@ func GetDraws(c *fiber.Ctx) error {
 	args1 = append(args1, limit, offSet)
 	draws := []model.Draw{}
 	rows, err := config.DB.Query(ctx,
-		`select d.id,d.code,d.customer_id,d.created_at,d.status,p.id as province_id,p.name as province_name,ds.id as district_id,ds.name as district_name,
-		c.created_at,pt.name as prize_type_name,pt.id as prize_type_id,pt.value as prize_type_value,c.network_operator,c.locale from draw d
+		`select d.id,d.code,d.customer_id,d.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali',d.status,p.id as province_id,p.name as province_name,ds.id as district_id,ds.name as district_name,
+		c.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali',pt.name as prize_type_name,pt.id as prize_type_id,pt.value as prize_type_value,c.network_operator,c.locale from draw d
 		inner join customer c on d.customer_id = c.id
 		inner join province p on c.province = p.id
 		inner join district ds on c.district = ds.id
@@ -996,7 +996,7 @@ func GetCustomer(c *fiber.Ctx) error {
 	customer := model.Customer{}
 	err = config.DB.QueryRow(ctx,
 		`select p.id as province_id,p.name as province_name,d.id as district_id,d.name as district_name,
-		c.created_at,c.network_operator,c.locale,pgp_sym_decrypt(c.names::bytea,$1) as names,pgp_sym_decrypt(c.phone::bytea,$1) as phone,c.id from customer c
+		c.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali',c.network_operator,c.locale,pgp_sym_decrypt(c.names::bytea,$1) as names,pgp_sym_decrypt(c.phone::bytea,$1) as phone,c.id from customer c
 		inner join province p on c.province = p.id
 		inner join district d on c.district = d.id where c.id=$2`, config.EncryptionKey, customerId).
 		Scan(&customer.Province.Id, &customer.Province.Name, &customer.District.Id, &customer.District.Name, &customer.CreatedAt, &customer.NetworkOperator,
@@ -1041,9 +1041,9 @@ func GetEntryData(c *fiber.Ctx) error {
 	var prizeId *int
 	err = config.DB.QueryRow(ctx,
 		`select e.id,e.code_id,e.customer_id,e.created_at,p.id as province_id,p.name as province_name,d.id as district_id,d.name as district_name,
-		c.created_at,pt.name as prize_type_name,pt.id as prize_type_id,pt.value as prize_type_value,cd.created_at,c.network_operator,c.locale,
+		c.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali',pt.name as prize_type_name,pt.id as prize_type_id,pt.value as prize_type_value,cd.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali',c.network_operator,c.locale,
 		pgp_sym_decrypt(c.names::bytea,$1) as names,pgp_sym_decrypt(c.momo_names::bytea,$1) as momo_names,pgp_sym_decrypt(c.phone::bytea,$1) as phone,
-		pgp_sym_decrypt(cd.code::bytea,$1) as raw_code,pr.created_at,pr.id as prize_id from entries e
+		pgp_sym_decrypt(cd.code::bytea,$1) as raw_code,pr.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali',pr.id as prize_id from entries e
 		inner join customer c on e.customer_id = c.id
 		inner join codes cd on e.code_id = cd.id
 		inner join province p on c.province = p.id
@@ -1589,11 +1589,11 @@ func StartPrizeDraw(c *fiber.Ctx) error {
 	entryFilter := ""
 	excludeCustomers := []string{}
 	if period == "MONTHLY" {
-		entryFilter = "e.created_at >= now() - interval '1 month'"
+		entryFilter = "e.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali' >= now() - interval '1 month'"
 	} else if period == "WEEKLY" {
-		entryFilter = "e.created_at >= now() - interval '1 week' AND e.created_at < date_trunc('day', now())"
+		entryFilter = "e.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali' >= now() - interval '6 day' AND e.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali' < date_trunc('day', now())"
 	} else if period == "DAILY" {
-		entryFilter = "e.created_at >= now() - interval '1 day'"
+		entryFilter = "e.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali' >= now() - interval '1 day'"
 	} else if period == "GRAND" {
 		//exclude all monthly winners
 		rows, err := config.DB.Query(ctx,
@@ -1623,7 +1623,7 @@ func StartPrizeDraw(c *fiber.Ctx) error {
 	}
 	//fetch latest prizes (customerId) for the selected prize type
 	rows, err := config.DB.Query(ctx,
-		`select e.customer_id from prize p INNER JOIN entries e on e.id = p.entry_id where p.prize_type_id=$1 and p.created_at >= now() - interval '1 day'`, formData.PrizeType)
+		`select e.customer_id from prize p INNER JOIN entries e on e.id = p.entry_id where p.prize_type_id=$1 and p.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali' >= now() - interval '1 day'`, formData.PrizeType)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Unable to start a new draw, system error", utils.Logger{
@@ -1660,7 +1660,7 @@ func StartPrizeDraw(c *fiber.Ctx) error {
 	//get elligible entries
 	entries := []model.Entries{}
 	entryRows, err := config.DB.Query(ctx,
-		`select e.id,e.code_id,e.customer_id,e.created_at from entries e `+finalFilter)
+		`select e.id,e.code_id,e.customer_id,e.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali' from entries e `+finalFilter)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return utils.JsonErrorResponse(c, fiber.StatusExpectationFailed, "No elligible entries found for the selected prize type")
@@ -1826,7 +1826,7 @@ func GetDepartments(c *fiber.Ctx) error {
 	}
 	departments := []model.Department{}
 	rows, err := config.DB.Query(ctx,
-		`select id,title,created_at from departments`)
+		`select id,title,created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali' from departments`)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get department data failed", utils.Logger{
@@ -1885,9 +1885,9 @@ func GetSMSSent(c *fiber.Ctx) error {
 	// limitStr := fmt.Sprintf(" limit $%d offset $%d", a+1, a+2)
 	logsFilter, ii := utils.BuildQueryFilter(
 		map[string]interface{}{
-			"sms.created_at >= ": startDateStr,
-			"sms.created_at <= ": endDateStr,
-			"sms.type":           messageType,
+			"sms.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali' >= ": startDateStr,
+			"sms.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali' <= ": endDateStr,
+			"sms.type": messageType,
 		},
 		&args1,
 	)
@@ -1896,7 +1896,7 @@ func GetSMSSent(c *fiber.Ctx) error {
 	args1 = append(args1, limit, offSet)
 	smsData := []SmsData{}
 	rows, err := config.DB.Query(ctx,
-		`select message_id,message,phone,type,status,error_message,created_at from sms`+logsFilter+` order by id desc`+limitStr, args1...)
+		`select message_id,message,phone,type,status,error_message,created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali' from sms`+logsFilter+` order by id desc`+limitStr, args1...)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get sms data failed", utils.Logger{
@@ -1964,8 +1964,8 @@ func GetPrizeOverview(c *fiber.Ctx) error {
 		if err != nil {
 			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Invalid start date provided")
 		}
-		dateFilter += "p.created_at >= $1"
-		dateFilterEntry += "e.created_at >= $1"
+		dateFilter += "p.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali' >= $1"
+		dateFilterEntry += "e.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali' >= $1"
 		args = append(args, startDateStr)
 	}
 	if len(endDateStr) != 0 {
@@ -1988,8 +1988,8 @@ func GetPrizeOverview(c *fiber.Ctx) error {
 			argName = "$2"
 		}
 		args = append(args, endDate)
-		dateFilter += "p.created_at <= " + argName
-		dateFilterEntry += "e.created_at <= " + argName
+		dateFilter += "p.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali' <= " + argName
+		dateFilterEntry += "e.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali' <= " + argName
 	}
 	if len(dateFilter) != 0 {
 		dateFilter = " where " + dateFilter
@@ -2340,9 +2340,9 @@ func GetLogs(c *fiber.Ctx) error {
 	args1 := []interface{}{}
 	// limitStr := fmt.Sprintf(" limit $%d offset $%d", a+1, a+2)
 	logsFilter, ii := utils.BuildQueryFilter(map[string]interface{}{
-		"l.created_at >= ": startDateStr,
-		"l.created_at <= ": endDateStr,
-		"l.user_id":        userId,
+		"l.created_at AT TIME ZONE 'Africa/Kigali' >= ": startDateStr,
+		"l.created_at AT TIME ZONE 'Africa/Kigali' <= ": endDateStr,
+		"l.user_id": userId,
 	},
 		&args1,
 	)
@@ -2366,8 +2366,8 @@ func GetLogs(c *fiber.Ctx) error {
 	args1 = append(args1, limit, offSet)
 	logs := []utils.ActivityLog{}
 	rows, err := config.DB.Query(ctx,
-		`select l.user_id,l.activity_type,l.status,l.description,l.ip_address::text,l.user_agent,l.created_at,u.fname,u.lname,u.email,u.phone from activity_logs l `+
-			` inner join users u on u.id = l.user_id `+logsFilter+` order by l.created_at desc`+limitStr, args1...)
+		`select l.user_id,l.activity_type,l.status,l.description,l.ip_address::text,l.user_agent,l.created_at AT TIME ZONE 'Africa/Kigali',u.fname,u.lname,u.email,u.phone from activity_logs l `+
+			` inner join users u on u.id = l.user_id `+logsFilter+` order by l.created_at AT TIME ZONE 'Africa/Kigali' desc`+limitStr, args1...)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get activity logs data failed", utils.Logger{
@@ -2413,6 +2413,13 @@ func GetLogs(c *fiber.Ctx) error {
 func DistributeMomoPrize() {
 	//fetch pending transaction
 	// fmt.Println("Distributing momo prize")
+	//refresh codes after 20 min
+	if time.Now().Minute()%20 == 0 {
+		_, err := config.DB.Exec(ctx, "REFRESH MATERIALIZED VIEW codes_count;")
+		if err != nil {
+			utils.LogMessage(string(utils.CRITICAL), "DistributeMomoPrize: Unable to refresh codes_count, error: "+err.Error(), config.ServiceName)
+		}
+	}
 	rows, err := config.DB.Query(ctx, `SELECT t.id,t.amount,t.phone,t.mno,t.trx_id,t.transaction_type,p.code FROM transaction t
 	INNER JOIN prize p on p.id = t.prize_id WHERE t.status = 'PENDING' LIMIT 1000;`)
 	if err != nil {
@@ -2613,7 +2620,7 @@ func GetProvinces(c *fiber.Ctx) error {
 	}
 	provinces := []model.Province{}
 	rows, err := config.DB.Query(ctx,
-		`select id,name,created_at from province`)
+		`select id,name,created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali' from province`)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get province data failed", utils.Logger{
@@ -2676,12 +2683,12 @@ func GetTransactions(c *fiber.Ctx) error {
 	// limitStr := fmt.Sprintf(" limit $%d offset $%d", a+1, a+2)
 	logsFilter, ii := utils.BuildQueryFilter(
 		map[string]interface{}{
-			"t.created_at >= ": startDateStr,
-			"t.created_at <= ": endDateStr,
-			"t.phone":          phone,
-			"t.ref_no":         refNo,
-			"t.trx_id":         trxId,
-			"t.status":         status,
+			"t.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali' >= ": startDateStr,
+			"t.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali' <= ": endDateStr,
+			"t.phone":  phone,
+			"t.ref_no": refNo,
+			"t.trx_id": trxId,
+			"t.status": status,
 		},
 		&args1,
 	)
@@ -2694,7 +2701,7 @@ func GetTransactions(c *fiber.Ctx) error {
 	transactions := []model.Transactions{}
 	rows, err := config.DB.Query(ctx,
 		`select t.id,t.amount,t.phone,t.mno,coalesce(tr.trx_id,t.trx_id) as trx_id,t.ref_no,t.transaction_type,t.status,CASE WHEN t.status='SUCCESS' THEN '' ELSE t.error_message END as error_message,
-		t.created_at,p.entry_id,p.code,t.customer_id,t.initiated_by,t.updated_at,p.id as prize_id from transaction t
+		t.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali',p.entry_id,p.code,t.customer_id,t.initiated_by,t.updated_at,p.id as prize_id from transaction t
 		inner join prize p on p.id = t.prize_id LEFT JOIN (select max(id) as id,max(trx_id) as trx_id,transaction_id from transaction_records group by transaction_id) tr ON tr.transaction_id = t.id `+logsFilter+` order by t.created_at desc`+limitStr, args1...)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
@@ -3286,7 +3293,7 @@ func PlayerMetrics(c *fiber.Ctx) error {
 		if err != nil {
 			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Invalid start date provided")
 		}
-		dateFilter += "e.created_at >= $1"
+		dateFilter += "e.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali' >= $1"
 		args = append(args, startDateStr)
 	}
 	if len(endDateStr) != 0 {
@@ -3308,7 +3315,7 @@ func PlayerMetrics(c *fiber.Ctx) error {
 			argName = "$2"
 		}
 		args = append(args, endDate)
-		dateFilter += "e.created_at <= " + argName
+		dateFilter += "e.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali' <= " + argName
 	}
 	if len(dateFilter) != 0 {
 		dateFilter = " where " + dateFilter
@@ -3408,7 +3415,7 @@ func WinnerMetrics(c *fiber.Ctx) error {
 		if err != nil {
 			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Invalid start date provided")
 		}
-		dateFilter += "pr.created_at >= $1"
+		dateFilter += "pr.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali' >= $1"
 		args = append(args, startDateStr)
 	}
 	if len(endDateStr) != 0 {
@@ -3430,7 +3437,7 @@ func WinnerMetrics(c *fiber.Ctx) error {
 			argName = "$2"
 		}
 		args = append(args, endDate)
-		dateFilter += "pr.created_at <= " + argName
+		dateFilter += "pr.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali' <= " + argName
 	}
 	if len(dateFilter) != 0 {
 		dateFilter = " where " + dateFilter
@@ -3534,7 +3541,7 @@ func GetPrizeOverviewV2(c *fiber.Ctx) error {
 		if err != nil {
 			return utils.JsonErrorResponse(c, fiber.StatusNotAcceptable, "Invalid start date provided")
 		}
-		dateFilter += "p.created_at >= $1"
+		dateFilter += "p.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali' >= $1"
 		args = append(args, startDateStr)
 	}
 	if len(endDateStr) != 0 {
@@ -3556,7 +3563,7 @@ func GetPrizeOverviewV2(c *fiber.Ctx) error {
 			argName = "$2"
 		}
 		args = append(args, endDate)
-		dateFilter += "p.created_at <= " + argName
+		dateFilter += "p.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali' <= " + argName
 	}
 	if len(dateFilter) != 0 {
 		dateFilter = " where " + dateFilter

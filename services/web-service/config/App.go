@@ -18,9 +18,14 @@ var MTNTx *smpp.Transmitter
 var AirtelTX *smpp.Transmitter
 var ServiceName string = "web-service"
 var EncryptionKey string
+var Timezone string = "Africa/Kigali"
 
 func InitializeConfig() {
 	EncryptionKey = viper.GetString("encryption_key")
+	timezone := viper.GetString("timezone")
+	if timezone != "" {
+		Timezone = timezone
+	}
 	Redis = redis.NewClient(&redis.Options{
 		Addr:     fmt.Sprintf("%s:%s", viper.GetString("redis.host"), viper.GetString("redis.port")),
 		Password: viper.GetString("redis.password"),
