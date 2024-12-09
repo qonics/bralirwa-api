@@ -1,21 +1,38 @@
 #mode: release, development
 mode: development
 port: 9000
-logger-path: "auth-log.log"
-saltKey: 
+logger-path: "web-log.log"
+encryption_key: "Br@l1RWa!p*5s#(1)"
+web_url: https://test.rw
+backend_url: http://localhost:9080
 redis:
   port: 6379
-  password: 
-  database: 0
-db:
-  cluster: scylladb
-  keyspace: lottery_auth
   password:
-google:
-  clientID: 
-  clientSecret:
-  redirectUrl: http://localhost:3000/auth/login
-github:
-  clientID: 
-  clientSecret: 
-  redirectUrl: http://localhost:3000/auth/login
+  database: 0
+  host: redis
+redis_test:
+  port: 6379
+  password:
+  database: 1
+  host: 127.0.0.1
+postgres_db:
+  cluster: postgres
+  keyspace: lottery_db
+  password: Br@l!rwa*
+  user: postgres
+  port: 5432
+postgres_db_test:
+  cluster: 127.0.0.1
+  keyspace: lottery_db
+  password: Qonics!
+  user: postgres
+  port: 5432
+MOMO_URL: 
+MOMO_KEY: 
+SMS_URL: https://swiftqom.io/api/dev
+SMS_KEY: 
+SENDER_ID: "BRALIRWA"
+AIRTEL_URL: https://openapi.airtel.africa
+AIRTEL_ID: 
+AIRTEL_KEY: 
+sms_service_url: http://10.10.75.20:9091/api/v1/send-sms
