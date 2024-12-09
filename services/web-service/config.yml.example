@@ -1,21 +1,43 @@
 #mode: release, development
 mode: development
 port: 9000
-logger-path: "auth-log.log"
-saltKey: 
+ap_name: "Bralirwa Lottery system"
+logger-path: "web-log.log"
+encryption_key: 
+web_url: https://test.rw
+BACKEND_URL: http://localhost:8090
 redis:
   port: 6379
-  password: 
-  database: 0
-db:
-  cluster: scylladb
-  keyspace: lottery_auth
   password:
-google:
-  clientID: 
-  clientSecret:
-  redirectUrl: http://localhost:3000/auth/login
-github:
-  clientID: 
-  clientSecret: 
-  redirectUrl: http://localhost:3000/auth/login
+  database: 0
+  host: redis
+redis_test:
+  port: 6379
+  password: Qonics!
+  database: 1
+  host: 127.0.0.1
+postgres_db:
+  cluster: postgres
+  keyspace: lottery_db
+  password: 
+  user: postgres
+  port: 5432
+postgres_db_test:
+  cluster: 127.0.0.1
+  keyspace: lottery_db
+  password: Qonics!
+  user: postgres
+  port: 5432
+SMS_URL: 
+SMS_KEY: 
+SENDER_ID: "BRALIRWA"
+DISTRIBUTION_TYPES: "momo,cash,cheque,in-person"
+MOMO_URL: 
+MOMO_KEY: 
+MOMO_TRX_PREFIX: ""
+AIRTEL_URL: https://openapi.airtel.africa
+AIRTEL_ID: 
+AIRTEL_KEY: 
+AIRTEL_PIN: 
+AIRTEL_PUBLIC_KEY_V2: "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArUj2SQKLCdTqJ3/ZL6nkh1N3rtjXBBM+0hBUrhJ/VNSMTBixpD+JjeNaHbONcrvJGSstC2tcVfD04s9xGIKr9TT6hCYaqGojLeuLimVdXzaP5DzDyrHY8mYgHL+/EGRDh+/7B56Gw8UZxOBPtF6Wjjq0TWGcw5YOW1lSPUeaD+kupmDFlMRk26fASELwkYo5NkHgL/w+XzXw8gDZtrNS6L8UX2mfqdQ9qKpdMP3ztfOUPjmTvIbTKrGLx0U2sUSQINtMxZQzsYaXIGoZ2thvbIhJMDFBNbznuv1n8b03Q3MAnEK/xCduQBUkUg1syy7jZMT4ETDeFuW2NMZhteaadwIDAQAB"
+sms_service_url: http://10.10.75.20:9091/api/v1/send-sms

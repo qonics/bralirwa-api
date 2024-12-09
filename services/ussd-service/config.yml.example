@@ -1,21 +1,37 @@
 #mode: release, development
 mode: development
 port: 9000
-logger-path: "auth-log.log"
-saltKey: 
+logger-path: "web-log.log"
+encryption_key: ""
+web_url: https://test.rw
+backend_url: http://localhost:9080
 redis:
   port: 6379
-  password: 
-  database: 0
-db:
-  cluster: scylladb
-  keyspace: lottery_auth
   password:
-google:
-  clientID: 
-  clientSecret:
-  redirectUrl: http://localhost:3000/auth/login
-github:
-  clientID: 
-  clientSecret: 
-  redirectUrl: http://localhost:3000/auth/login
+  database: 0
+  host: redis
+redis_test:
+  port: 6379
+  password:
+  database: 1
+  host: 127.0.0.1
+postgres_db:
+  cluster: postgres
+  keyspace: lottery_db
+  password: 
+  user: postgres
+  port: 5432
+postgres_db_test:
+  cluster: 127.0.0.1
+  keyspace: lottery_db
+  password: 
+  user: postgres
+  port: 5432
+MOMO_URL: 
+MOMO_KEY: 
+SMS_URL: 
+SMS_KEY: 
+SENDER_ID: "BRALIRWA"
+AIRTEL_URL: 
+AIRTEL_ID: 
+AIRTEL_KEY: 
