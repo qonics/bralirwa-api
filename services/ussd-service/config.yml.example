@@ -2,7 +2,7 @@
 mode: development
 port: 9000
 logger-path: "web-log.log"
-encryption_key: ""
+encryption_key: "Br@l1RWa!p*5s#(1)"
 web_url: https://test.rw
 backend_url: http://localhost:9080
 redis:
@@ -18,20 +18,21 @@ redis_test:
 postgres_db:
   cluster: postgres
   keyspace: lottery_db
-  password: 
+  password: Br@l!rwa*
   user: postgres
   port: 5432
 postgres_db_test:
   cluster: 127.0.0.1
   keyspace: lottery_db
-  password: 
+  password: Qonics!
   user: postgres
   port: 5432
 MOMO_URL: 
 MOMO_KEY: 
-SMS_URL: 
+SMS_URL: https://swiftqom.io/api/dev
 SMS_KEY: 
 SENDER_ID: "BRALIRWA"
-AIRTEL_URL: 
+AIRTEL_URL: https://openapi.airtel.africa
 AIRTEL_ID: 
 AIRTEL_KEY: 
+sms_service_url: http://10.10.75.20:9091/api/v1/send-sms
