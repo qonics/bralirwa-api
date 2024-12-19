@@ -33,7 +33,7 @@ spec:
                 secretKeyRef:
                   name: postgres.postgres.credentials.postgresql.acid.zalan.do  # Name of your secret
                   key: password  # Key of your secret
-          image: qonicsinc/lottery-ussd-service:1.0.20
+          image: qonicsinc/lottery-ussd-service:1.0.21
           name: ussd-service
           ports:
             - containerPort: 9000

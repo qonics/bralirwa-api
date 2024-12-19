@@ -826,13 +826,13 @@ func getOdds(hour int) int {
 	case hour >= 0 && hour < 7:
 		return 5
 	case hour >= 7 && hour < 12:
-		return 5
+		return 2
 	case hour >= 12 && hour < 16:
-		return 5
+		return 1
 	case hour >= 16 && hour < 22:
-		return 5
+		return 1
 	default:
-		return 5
+		return 1
 	}
 }
 
