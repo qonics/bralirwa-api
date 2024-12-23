@@ -2701,8 +2701,8 @@ func GetTransactions(c *fiber.Ctx) error {
 	transactions := []model.Transactions{}
 	rows, err := config.DB.Query(ctx,
 		`select t.id,t.amount,t.phone,t.mno,coalesce(tr.trx_id,t.trx_id) as trx_id,t.ref_no,t.transaction_type,t.status,CASE WHEN t.status='SUCCESS' THEN '' ELSE t.error_message END as error_message,
-		t.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali',p.entry_id,p.code,t.customer_id,t.initiated_by,t.updated_at,p.id as prize_id from transaction t
-		inner join prize p on p.id = t.prize_id LEFT JOIN (select max(id) as id,max(trx_id) as trx_id,transaction_id from transaction_records group by transaction_id) tr ON tr.transaction_id = t.id `+logsFilter+` order by t.created_at desc`+limitStr, args1...)
+		t.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Kigali',p.entry_id,p.code,t.customer_id,t.initiated_by,t.updated_at,p.id as prize_id,pt.name from transaction t
+		inner join prize p on p.id = t.prize_id LEFT JOIN prize_type pt ON p.prize_type_id=pt.id LEFT JOIN (select max(id) as id,max(trx_id) as trx_id,transaction_id from transaction_records group by transaction_id) tr ON tr.transaction_id = t.id `+logsFilter+` order by t.created_at desc`+limitStr, args1...)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get transaction data failed", utils.Logger{
@@ -2717,7 +2717,7 @@ func GetTransactions(c *fiber.Ctx) error {
 		transaction := model.Transactions{}
 		err = rows.Scan(&transaction.Id, &transaction.Amount, &transaction.Phone, &transaction.Mno, &transaction.TrxId, &transaction.RefNo, &transaction.TransactionType,
 			&transaction.Status, &transaction.ErrorMessage, &transaction.CreatedAt, &transaction.EntryId, &transaction.Code, &transaction.CustomerId,
-			&transaction.InitiatedBy, &transaction.UpdatedAt, &transaction.PrizeId)
+			&transaction.InitiatedBy, &transaction.UpdatedAt, &transaction.PrizeId, &transaction.PrizeType)
 		if err != nil {
 			return utils.JsonErrorResponse(c, fiber.StatusInternalServerError, "Get transaction data failed", utils.Logger{
 				LogLevel:    utils.CRITICAL,

@@ -1,0 +1,186 @@
+{
+    "version": 1,
+    "details": "Bralirwa lottery ussd",
+    "allowed_source_hosts": "127.0.0.1",
+    "use_translation_keys": true,
+    "steps": [
+        {
+            "id": "welcome",
+            "content": "welcome_language",
+            "inputs": [
+                {
+                    "input": 1,
+                    "value": "en",
+                    "action": "preSavePreferredLang",
+                    "next_step": "register_code"
+                },
+                {
+                    "input": 2,
+                    "value": "rw",
+                    "action": "preSavePreferredLang",
+                    "next_step": "register_code"
+                }
+            ],
+            "allow_back": false,
+            "validation": "",
+            "is_end_session": false
+        },
+        {
+            "id": "register_code",
+            "content": "register_enter_code",
+            "inputs": [
+                {
+                    "input": 0,
+                    "value": null,
+                    "action": null,
+                    "next_step": "welcome"
+                },
+                {
+                    "input": "",
+                    "value": null,
+                    "action": "preRegisterSaveCode",
+                    "next_step": "register_province"
+                }
+            ],
+            "allow_back": true,
+            "validation": "",
+            "is_end_session": false
+        },
+        {
+            "id": "register_name",
+            "content": "register_enter_name",
+            "inputs": [
+                {
+                    "input": "",
+                    "value": null,
+                    "action": "preRegisterSaveName",
+                    "next_step": "register_province"
+                }
+            ],
+            "allow_back": false,
+            "validation": "",
+            "is_end_session": false
+        },
+        {
+            "id": "register_province",
+            "content": "getProvince:fn",
+            "content_type": "dynamic",
+            "inputs": [
+                {
+                    "input": "",
+                    "value": null,
+                    "action": "preRegisterSaveProvince",
+                    "next_step": "register_district"
+                }
+            ],
+            "allow_back": false,
+            "validation": "",
+            "is_end_session": false
+        },
+        {
+            "id": "register_district",
+            "content": "getDistrict:fn",
+            "inputs": [
+                {
+                    "input": "",
+                    "value": null,
+                    "action": "completeRegistration",
+                    "next_step": ""
+                }
+            ],
+            "allow_back": false,
+            "validation": "",
+            "is_end_session": true
+        },
+        {
+            "id": "home",
+            "content": "home_ussd",
+            "inputs": [
+                {
+                    "input": 1,
+                    "value": null,
+                    "action": "",
+                    "next_step": "entry_code"
+                },
+                {
+                    "input": 2,
+                    "value": null,
+                    "action": "",
+                    "next_step": "change_lang"
+                }
+            ],
+            "allow_back": false,
+            "validation": "",
+            "is_end_session": false
+        },
+        {
+            "id": "change_lang",
+            "content": "change_lang",
+            "inputs": [
+                {
+                    "input": 0,
+                    "value": null,
+                    "action": "",
+                    "next_step": "home"
+                },
+                {
+                    "input": 1,
+                    "value": "en",
+                    "action": "savePreferredLang",
+                    "next_step": "action_ack"
+                },
+                {
+                    "input": 2,
+                    "value": "rw",
+                    "action": "savePreferredLang",
+                    "next_step": "action_ack"
+                }
+            ],
+            "allow_back": true,
+            "validation": "",
+            "is_end_session": false
+        },
+        {
+            "id": "action_ack",
+            "content": "action_done",
+            "inputs": [
+                {
+                    "input": 1,
+                    "value": null,
+                    "action": "",
+                    "next_step": "home"
+                },
+                {
+                    "input": 2,
+                    "value": null,
+                    "action": "end_session",
+                    "next_step": ""
+                }
+            ],
+            "allow_back": true,
+            "validation": "action_completed",
+            "is_end_session": false
+        },
+        {
+            "id": "entry_code",
+            "content": "register_enter_code",
+            "inputs": [
+                {
+                    "input": 0,
+                    "value": null,
+                    "action": "",
+                    "next_step": "home"
+                },
+                {
+                    "input": "",
+                    "value": null,
+                    "action": "entrySaveCode",
+                    "next_step": "action_ack"
+                }
+            ],
+            "allow_back": true,
+            "validation": "",
+            "is_end_session": false
+        }
+    ]
+}
