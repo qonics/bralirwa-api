@@ -1597,7 +1597,7 @@ func StartPrizeDraw(c *fiber.Ctx) error {
 	} else if period == "GRAND" {
 		//exclude all monthly winners
 		rows, err := config.DB.Query(ctx,
-			`select e.customer_id from prize_type p INNER JOIN entries e ON e.id=p.entry_id INNER JOIN prize_type pt on pt.id p.prize_type_id
+			`select e.customer_id from prize p INNER JOIN entries e ON e.id=p.entry_id INNER JOIN prize_type pt on pt.id=p.prize_type_id
 			where pt.period='MONTHLY' group by e.customer_id`)
 		if err != nil {
 			if !errors.Is(err, pgx.ErrNoRows) {
